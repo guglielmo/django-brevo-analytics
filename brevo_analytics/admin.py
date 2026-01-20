@@ -1,6 +1,5 @@
 from django.contrib import admin
 from django.urls import path
-from django.utils.html import format_html
 from .models import BrevoEmail
 from . import views
 
@@ -48,6 +47,3 @@ class BrevoEmailAdmin(admin.ModelAdmin):
 
     # Customize admin changelist (won't be used, but good for consistency)
     list_display = ('__str__',)
-
-    def __str__(self):
-        return "Brevo Analytics"

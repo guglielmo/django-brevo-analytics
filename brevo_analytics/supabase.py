@@ -1,6 +1,6 @@
 """Supabase client wrapper for Brevo Analytics data access"""
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 
 from django.core.cache import cache
