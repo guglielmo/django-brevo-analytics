@@ -1,8 +1,11 @@
+import logging
 from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.core.cache import cache
 from .supabase import SupabaseClient
 from .exceptions import ConfigurationError, SupabaseAPIError
+
+logger = logging.getLogger(__name__)
 
 
 def dashboard_view(request):
@@ -35,6 +38,7 @@ def dashboard_view(request):
             'api_healthy': True,
         })
     except SupabaseAPIError as e:
+        logger.error(f"Supabase API error in dashboard_view: {str(e)}", exc_info=True)
         # Try to use cached data
         cache_key = f'brevo_dashboard_{date_range}'
         cached_stats = cache.get(cache_key)
@@ -86,6 +90,7 @@ def email_list_view(request):
         context['emails'] = emails
         context['api_healthy'] = True
     except SupabaseAPIError as e:
+        logger.error(f"Supabase API error in email_list_view: {str(e)}", exc_info=True)
         # Try cached data
         cache_key = f'brevo_emails_{date_range}_{search}'
         cached_emails = cache.get(cache_key)
@@ -127,6 +132,7 @@ def email_detail_view(request, email_id):
         context['events'] = email_data['events']
         context['api_healthy'] = True
     except SupabaseAPIError as e:
+        logger.error(f"Supabase API error in email_detail_view: {str(e)}", exc_info=True)
         # Try cached data
         cache_key = f'brevo_email_{email_id}'
         cached_data = cache.get(cache_key)
