@@ -1,0 +1,11 @@
+"""
+Django Brevo Analytics
+~~~~~~~~~~~~~~~~~~~~~
+
+A reusable Django package for viewing Brevo transactional email
+analytics in Django admin.
+"""
+
+__version__ = '0.1.0'
+
+default_app_config = 'brevo_analytics.apps.BrevoAnalyticsConfig'
