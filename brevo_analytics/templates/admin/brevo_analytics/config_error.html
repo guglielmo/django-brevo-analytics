@@ -1,0 +1,73 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="brevo-analytics-error">
+    <h1>Configuration Error</h1>
+
+    <div class="error-message">
+        <p>{{ error_message }}</p>
+    </div>
+
+    <div class="error-details">
+        <h2>Required Configuration</h2>
+        <p>Add the following to your Django settings:</p>
+
+        <pre><code>BREVO_ANALYTICS = {
+    'SUPABASE_URL': 'https://your-project.supabase.co',
+    'JWT': 'your-jwt-token-with-client-id-claim',
+    'CACHE_TIMEOUT': 300,  # optional, defaults to 5 minutes
+    'RETENTION_DAYS': 60,   # optional, defaults to 60 days
+}</code></pre>
+
+        <h2>JWT Requirements</h2>
+        <ul>
+            <li>JWT must include a <code>client_id</code> claim for RLS</li>
+            <li>JWT must have read permissions on emails and email_events tables</li>
+        </ul>
+    </div>
+</div>
+
+<style>
+.brevo-analytics-error {
+    max-width: 800px;
+    margin: 40px auto;
+    padding: 20px;
+}
+
+.error-message {
+    background: #f8d7da;
+    border: 1px solid #f5c6cb;
+    color: #721c24;
+    padding: 15px;
+    border-radius: 4px;
+    margin: 20px 0;
+}
+
+.error-details {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    padding: 20px;
+    border-radius: 4px;
+}
+
+.error-details h2 {
+    margin-top: 20px;
+    font-size: 18px;
+}
+
+.error-details pre {
+    background: #fff;
+    border: 1px solid #dee2e6;
+    padding: 15px;
+    border-radius: 4px;
+    overflow-x: auto;
+}
+
+.error-details ul {
+    margin-left: 20px;
+}
+</style>
+{% endblock %}
