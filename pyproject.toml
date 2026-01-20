@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "django-brevo-analytics"
+version = "0.1.0"
+description = "Django admin integration for Brevo transactional email analytics"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+classifiers = [
+    "Environment :: Web Environment",
+    "Framework :: Django",
+    "Framework :: Django :: 4.2",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+]
+dependencies = [
+    "Django>=4.2",
+    "postgrest-py>=0.10.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/django-brevo-analytics"
+Documentation = "https://github.com/yourusername/django-brevo-analytics/blob/main/README.md"
+Repository = "https://github.com/yourusername/django-brevo-analytics"
+Changelog = "https://github.com/yourusername/django-brevo-analytics/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+include = ["brevo_analytics*"]
