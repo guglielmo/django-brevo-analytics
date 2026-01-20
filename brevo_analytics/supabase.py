@@ -118,7 +118,7 @@ class SupabaseClient:
         logger.info(f"Fetching dashboard stats from {from_date}")
 
         # Query emails table for counts
-        emails_response = self.client.from_('emails') \
+        emails_response = self.client.from_('brevo_analytics.emails') \
             .select('id,sent_at') \
             .gte('sent_at', from_date.isoformat()) \
             .execute()
@@ -140,7 +140,7 @@ class SupabaseClient:
         email_ids = [e['id'] for e in emails_response.data]
 
         # Query events for these emails
-        events_response = self.client.from_('email_events') \
+        events_response = self.client.from_('brevo_analytics.email_events') \
             .select('email_id,event_type,event_timestamp') \
             .in_('email_id', email_ids) \
             .execute()
@@ -248,7 +248,7 @@ class SupabaseClient:
         logger.info(f"Fetching emails from {from_date} (search={search})")
 
         # Start with base query
-        query = self.client.from_('emails') \
+        query = self.client.from_('brevo_analytics.emails') \
             .select('id,recipient_email,template_name,subject,sent_at,brevo_email_id') \
             .gte('sent_at', from_date.isoformat()) \
             .order('sent_at', desc=True) \
@@ -276,7 +276,7 @@ class SupabaseClient:
         # Get latest event for each email to determine current status
         if emails:
             email_ids = [e['id'] for e in emails]
-            events_response = self.client.from_('email_events') \
+            events_response = self.client.from_('brevo_analytics.email_events') \
                 .select('email_id,event_type,event_timestamp') \
                 .in_('email_id', email_ids) \
                 .order('event_timestamp', desc=False) \
@@ -362,7 +362,7 @@ class SupabaseClient:
         logger.info(f"Fetching email detail for {email_id}")
 
         # Fetch email record
-        email_response = self.client.from_('emails') \
+        email_response = self.client.from_('brevo_analytics.emails') \
             .select('*') \
             .eq('id', email_id) \
             .single() \
@@ -372,7 +372,7 @@ class SupabaseClient:
             raise SupabaseAPIError(f"Email {email_id} not found")
 
         # Fetch all events for this email
-        events_response = self.client.from_('email_events') \
+        events_response = self.client.from_('brevo_analytics.email_events') \
             .select('*') \
             .eq('email_id', email_id) \
             .order('event_timestamp', desc=False) \
