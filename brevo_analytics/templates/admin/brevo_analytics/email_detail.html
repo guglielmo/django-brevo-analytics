@@ -1,0 +1,244 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block title %}Email Detail - {{ email.recipient }}{% endblock %}
+
+{% block extrastyle %}
+<style>
+    .email-detail-container {
+        padding: 20px;
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+
+    .email-header {
+        background: white;
+        padding: 20px;
+        border-radius: 4px;
+        margin-bottom: 20px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .email-header h1 {
+        margin: 0 0 20px 0;
+        color: #333;
+    }
+
+    .email-meta {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 15px;
+    }
+
+    .meta-item {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .meta-label {
+        font-weight: bold;
+        color: #666;
+        font-size: 12px;
+        text-transform: uppercase;
+        margin-bottom: 5px;
+    }
+
+    .meta-value {
+        color: #333;
+        font-size: 14px;
+    }
+
+    .events-section {
+        background: white;
+        padding: 20px;
+        border-radius: 4px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .events-section h2 {
+        margin: 0 0 20px 0;
+        color: #333;
+    }
+
+    .timeline {
+        position: relative;
+        padding-left: 40px;
+    }
+
+    .timeline::before {
+        content: '';
+        position: absolute;
+        left: 12px;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: #e0e0e0;
+    }
+
+    .timeline-item {
+        position: relative;
+        padding-bottom: 30px;
+    }
+
+    .timeline-item:last-child {
+        padding-bottom: 0;
+    }
+
+    .timeline-marker {
+        position: absolute;
+        left: -33px;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: white;
+        border: 3px solid #4CAF50;
+        z-index: 1;
+    }
+
+    .timeline-marker.delivered { border-color: #4CAF50; }
+    .timeline-marker.opened { border-color: #2196F3; }
+    .timeline-marker.clicked { border-color: #FF9800; }
+    .timeline-marker.hard_bounce,
+    .timeline-marker.soft_bounce,
+    .timeline-marker.blocked { border-color: #f44336; }
+    .timeline-marker.unsubscribed { border-color: #9E9E9E; }
+
+    .timeline-content {
+        background: #f9f9f9;
+        padding: 15px;
+        border-radius: 4px;
+        border-left: 3px solid #e0e0e0;
+    }
+
+    .timeline-content.delivered { border-left-color: #4CAF50; }
+    .timeline-content.opened { border-left-color: #2196F3; }
+    .timeline-content.clicked { border-left-color: #FF9800; }
+    .timeline-content.hard_bounce,
+    .timeline-content.soft_bounce,
+    .timeline-content.blocked { border-left-color: #f44336; }
+    .timeline-content.unsubscribed { border-left-color: #9E9E9E; }
+
+    .event-type {
+        font-weight: bold;
+        color: #333;
+        text-transform: capitalize;
+        margin-bottom: 5px;
+    }
+
+    .event-date {
+        color: #666;
+        font-size: 12px;
+        margin-bottom: 10px;
+    }
+
+    .event-details {
+        color: #555;
+        font-size: 14px;
+    }
+
+    .bounce-details {
+        background: #ffebee;
+        padding: 10px;
+        border-radius: 4px;
+        margin-top: 10px;
+    }
+
+    .bounce-details strong {
+        color: #c62828;
+    }
+
+    .back-button {
+        display: inline-block;
+        padding: 8px 16px;
+        background: #417690;
+        color: white;
+        text-decoration: none;
+        border-radius: 4px;
+        margin-bottom: 20px;
+    }
+
+    .back-button:hover {
+        background: #305968;
+        color: white;
+    }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Home</a>
+    &rsaquo; <a href="{% url 'admin:app_list' app_label='brevo_analytics' %}">Brevo Analytics</a>
+    &rsaquo; <a href="{% url 'admin:brevo_analytics_brevoorgtransactionalemail_changelist' %}">Emails</a>
+    &rsaquo; {{ email.recipient }}
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="email-detail-container">
+    <a href="{% url 'admin:brevo_analytics_brevoorgtransactionalemail_changelist' %}" class="back-button">
+        &larr; Back to Email List
+    </a>
+
+    <div class="email-header">
+        <h1>Email Details</h1>
+        <div class="email-meta">
+            <div class="meta-item">
+                <span class="meta-label">Recipient</span>
+                <span class="meta-value">{{ email.recipient }}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">Template</span>
+                <span class="meta-value">{{ email.template_id }}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">Subject</span>
+                <span class="meta-value">{{ email.subject|default:"N/A" }}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">Sent Date</span>
+                <span class="meta-value">{{ email.sent_at|date:"Y-m-d H:i:s" }}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">Brevo Message ID</span>
+                <span class="meta-value">{{ email.brevo_message_id }}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="events-section">
+        <h2>Event Timeline</h2>
+        {% if events %}
+            <div class="timeline">
+                {% for event in events %}
+                    <div class="timeline-item">
+                        <div class="timeline-marker {{ event.event_type }}"></div>
+                        <div class="timeline-content {{ event.event_type }}">
+                            <div class="event-type">{{ event.event_type|replace:"_":" " }}</div>
+                            <div class="event-date">{{ event.event_date|date:"Y-m-d H:i:s" }}</div>
+
+                            {% if event.event_type == "clicked" and event.link %}
+                                <div class="event-details">
+                                    <strong>Link:</strong> {{ event.link }}
+                                </div>
+                            {% endif %}
+
+                            {% if event.event_type == "hard_bounce" or event.event_type == "soft_bounce" or event.event_type == "blocked" %}
+                                <div class="bounce-details">
+                                    {% if event.bounce_type %}
+                                        <div><strong>Bounce Type:</strong> {{ event.bounce_type }}</div>
+                                    {% endif %}
+                                    {% if event.bounce_reason %}
+                                        <div><strong>Reason:</strong> {{ event.bounce_reason }}</div>
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p>No events recorded for this email yet.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
