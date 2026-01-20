@@ -117,17 +117,84 @@ class SupabaseClient:
         from_date = self._get_date_filter(date_range)
         logger.info(f"Fetching dashboard stats from {from_date}")
 
-        # TODO: Implement actual Supabase query using postgrest-py
-        # This is a placeholder - actual implementation needs SQL queries
+        # Query emails table for counts
+        emails_response = self.client.from_('emails') \
+            .select('id,sent_at') \
+            .gte('sent_at', from_date.isoformat()) \
+            .execute()
+
+        total_sent = len(emails_response.data)
+
+        if total_sent == 0:
+            return {
+                'total_sent': 0,
+                'delivery_rate': 0.0,
+                'bounce_rate': 0.0,
+                'avg_delivery_time': 0.0,
+                'sent_trend': [],
+                'delivery_trend': [],
+                'bounce_trend': [],
+            }
+
+        # Get all email IDs
+        email_ids = [e['id'] for e in emails_response.data]
+
+        # Query events for these emails
+        events_response = self.client.from_('email_events') \
+            .select('email_id,event_type,event_timestamp') \
+            .in_('email_id', email_ids) \
+            .execute()
+
+        # Build event lookup
+        events_by_email = {}
+        for event in events_response.data:
+            email_id = event['email_id']
+            if email_id not in events_by_email:
+                events_by_email[email_id] = []
+            events_by_email[email_id].append(event)
+
+        # Calculate metrics
+        delivered_count = 0
+        bounced_count = 0
+        delivery_times = []
+
+        for email in emails_response.data:
+            email_id = email['id']
+            email_events = events_by_email.get(email_id, [])
+
+            has_delivered = any(e['event_type'] == 'delivered' for e in email_events)
+            has_bounced = any(e['event_type'] == 'bounced' for e in email_events)
+
+            if has_delivered:
+                delivered_count += 1
+
+                # Calculate delivery time
+                sent_time = datetime.fromisoformat(email['sent_at'].replace('Z', '+00:00'))
+                delivered_event = next(e for e in email_events if e['event_type'] == 'delivered')
+                delivered_time = datetime.fromisoformat(delivered_event['event_timestamp'].replace('Z', '+00:00'))
+                delivery_times.append((delivered_time - sent_time).total_seconds())
+
+            if has_bounced:
+                bounced_count += 1
+
+        delivery_rate = (delivered_count / total_sent * 100) if total_sent > 0 else 0.0
+        bounce_rate = (bounced_count / total_sent * 100) if total_sent > 0 else 0.0
+        avg_delivery_time = sum(delivery_times) / len(delivery_times) if delivery_times else 0.0
+
+        # Build daily trends (simplified - just counts for now)
+        # TODO: Implement actual daily aggregation
+        sent_trend = [total_sent // 7] * 7  # Mock trend
+        delivery_trend = [delivery_rate] * 7
+        bounce_trend = [bounce_rate] * 7
 
         return {
-            'total_sent': 0,
-            'delivery_rate': 0.0,
-            'bounce_rate': 0.0,
-            'avg_delivery_time': 0.0,
-            'sent_trend': [],
-            'delivery_trend': [],
-            'bounce_trend': [],
+            'total_sent': total_sent,
+            'delivery_rate': delivery_rate,
+            'bounce_rate': bounce_rate,
+            'avg_delivery_time': avg_delivery_time,
+            'sent_trend': sent_trend,
+            'delivery_trend': delivery_trend,
+            'bounce_trend': bounce_trend,
         }
 
     def get_emails(self, date_range: str = '7d', search: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -180,10 +247,69 @@ class SupabaseClient:
         from_date = self._get_date_filter(date_range)
         logger.info(f"Fetching emails from {from_date} (search={search})")
 
-        # TODO: Implement actual Supabase query using postgrest-py
-        # Placeholder - actual implementation needs postgrest queries
+        # Start with base query
+        query = self.client.from_('emails') \
+            .select('id,recipient_email,template_name,subject,sent_at,brevo_email_id') \
+            .gte('sent_at', from_date.isoformat()) \
+            .order('sent_at', desc=True) \
+            .limit(1000)  # Reasonable limit
 
-        return []
+        # Add search filter if provided
+        if search:
+            # PostgREST uses ilike for case-insensitive pattern matching
+            # We'll do OR search across recipient and subject
+            # Note: postgrest-py doesn't have great OR support, so we'll do client-side filtering
+            pass
+
+        response = query.execute()
+        emails = response.data
+
+        # Apply search filter client-side if needed
+        if search:
+            search_lower = search.lower()
+            emails = [
+                e for e in emails
+                if search_lower in e.get('recipient_email', '').lower()
+                or search_lower in e.get('subject', '').lower()
+            ]
+
+        # Get latest event for each email to determine current status
+        if emails:
+            email_ids = [e['id'] for e in emails]
+            events_response = self.client.from_('email_events') \
+                .select('email_id,event_type,event_timestamp') \
+                .in_('email_id', email_ids) \
+                .order('event_timestamp', desc=False) \
+                .execute()
+
+            # Group events by email and determine current status
+            events_by_email = {}
+            for event in events_response.data:
+                email_id = event['email_id']
+                if email_id not in events_by_email:
+                    events_by_email[email_id] = []
+                events_by_email[email_id].append(event)
+
+            # Determine current status for each email
+            for email in emails:
+                email_id = email['id']
+                email_events = events_by_email.get(email_id, [])
+
+                # Status hierarchy: clicked > opened > delivered > bounced > sent
+                if any(e['event_type'] == 'clicked' for e in email_events):
+                    email['current_status'] = 'clicked'
+                elif any(e['event_type'] == 'opened' for e in email_events):
+                    email['current_status'] = 'opened'
+                elif any(e['event_type'] == 'delivered' for e in email_events):
+                    email['current_status'] = 'delivered'
+                elif any(e['event_type'] == 'bounced' for e in email_events):
+                    email['current_status'] = 'bounced'
+                elif any(e['event_type'] == 'unsubscribed' for e in email_events):
+                    email['current_status'] = 'unsubscribed'
+                else:
+                    email['current_status'] = 'sent'
+
+        return emails
 
     def get_email_detail(self, email_id: str) -> Dict[str, Any]:
         """
@@ -235,10 +361,24 @@ class SupabaseClient:
         """
         logger.info(f"Fetching email detail for {email_id}")
 
-        # TODO: Implement actual Supabase query using postgrest-py
-        # Placeholder - actual implementation needs postgrest queries
+        # Fetch email record
+        email_response = self.client.from_('emails') \
+            .select('*') \
+            .eq('id', email_id) \
+            .single() \
+            .execute()
+
+        if not email_response.data:
+            raise SupabaseAPIError(f"Email {email_id} not found")
+
+        # Fetch all events for this email
+        events_response = self.client.from_('email_events') \
+            .select('*') \
+            .eq('email_id', email_id) \
+            .order('event_timestamp', desc=False) \
+            .execute()
 
         return {
-            'email': {},
-            'events': []
+            'email': email_response.data,
+            'events': events_response.data
         }
