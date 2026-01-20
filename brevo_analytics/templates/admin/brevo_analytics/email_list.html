@@ -1,0 +1,180 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block extrahead %}
+{{ block.super }}
+<link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+<style>
+    .email-list-container {
+        padding: 20px;
+    }
+    .list-header {
+        margin-bottom: 20px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .search-form {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+    }
+    .search-form input[type="text"],
+    .search-form input[type="date"] {
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+    .search-form button {
+        padding: 8px 16px;
+        background-color: #417690;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+    .search-form button:hover {
+        background-color: #2e5266;
+    }
+    table.dataTable tbody tr {
+        cursor: pointer;
+    }
+    table.dataTable tbody tr:hover {
+        background-color: #f5f5f5;
+    }
+    .status-badge {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: bold;
+    }
+    .status-sent {
+        background-color: #d4edda;
+        color: #155724;
+    }
+    .status-delivered {
+        background-color: #d1ecf1;
+        color: #0c5460;
+    }
+    .status-opened {
+        background-color: #fff3cd;
+        color: #856404;
+    }
+    .status-clicked {
+        background-color: #cce5ff;
+        color: #004085;
+    }
+    .status-bounced {
+        background-color: #f8d7da;
+        color: #721c24;
+    }
+    .no-data {
+        text-align: center;
+        padding: 40px;
+        color: #666;
+    }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Home</a>
+    &rsaquo; <a href="{% url 'admin:app_list' app_label='brevo_analytics' %}">Brevo Analytics</a>
+    &rsaquo; Email List
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="email-list-container">
+    <div class="list-header">
+        <h1>Email List</h1>
+        <form method="get" class="search-form">
+            <input type="text" name="q" placeholder="Search by recipient or subject" value="{{ request.GET.q }}">
+            <input type="date" name="date_from" placeholder="From date" value="{{ request.GET.date_from }}">
+            <input type="date" name="date_to" placeholder="To date" value="{{ request.GET.date_to }}">
+            <button type="submit">Filter</button>
+            {% if request.GET.q or request.GET.date_from or request.GET.date_to %}
+                <a href="{% url 'admin:brevo_analytics_email_list' %}" style="padding: 8px 16px; text-decoration: none; color: #666;">Clear</a>
+            {% endif %}
+        </form>
+    </div>
+
+    {% if emails %}
+        <table id="emailTable" class="display" style="width:100%">
+            <thead>
+                <tr>
+                    <th>Recipient</th>
+                    <th>Template</th>
+                    <th>Subject</th>
+                    <th>Sent Date</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for email in emails %}
+                <tr data-url="{% url 'admin:brevo_analytics_email_detail' email.message_id %}">
+                    <td>{{ email.recipient_email }}</td>
+                    <td>{{ email.template_name|default:"—" }}</td>
+                    <td>{{ email.subject|truncatewords:10 }}</td>
+                    <td>{{ email.sent_at|date:"Y-m-d H:i" }}</td>
+                    <td>
+                        {% if email.status == 'clicked' %}
+                            <span class="status-badge status-clicked">Clicked</span>
+                        {% elif email.status == 'opened' %}
+                            <span class="status-badge status-opened">Opened</span>
+                        {% elif email.status == 'delivered' %}
+                            <span class="status-badge status-delivered">Delivered</span>
+                        {% elif email.status == 'bounced' %}
+                            <span class="status-badge status-bounced">Bounced</span>
+                        {% else %}
+                            <span class="status-badge status-sent">Sent</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="no-data">
+            <p>No emails found.</p>
+            {% if request.GET.q or request.GET.date_from or request.GET.date_to %}
+                <p>Try adjusting your search filters.</p>
+            {% endif %}
+        </div>
+    {% endif %}
+</div>
+
+<script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+<script>
+    $(document).ready(function() {
+        var table = $('#emailTable').DataTable({
+            order: [[3, 'desc']], // Sort by sent date descending
+            pageLength: 25,
+            lengthMenu: [[25, 50, 100], [25, 50, 100]],
+            language: {
+                search: "Search table:",
+                lengthMenu: "Show _MENU_ entries",
+                info: "Showing _START_ to _END_ of _TOTAL_ emails",
+                infoEmpty: "No emails to display",
+                infoFiltered: "(filtered from _MAX_ total emails)",
+                zeroRecords: "No matching emails found"
+            },
+            columnDefs: [
+                { orderable: true, targets: [0, 1, 2, 3, 4] }
+            ]
+        });
+
+        // Make rows clickable
+        $('#emailTable tbody').on('click', 'tr', function() {
+            var url = $(this).data('url');
+            if (url) {
+                window.location.href = url;
+            }
+        });
+    });
+</script>
+{% endblock %}
