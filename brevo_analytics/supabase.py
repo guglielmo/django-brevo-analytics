@@ -1,10 +1,11 @@
 """Supabase client wrapper for Brevo Analytics data access"""
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Dict, List, Optional, Any
 
 from django.core.cache import cache
 from django.conf import settings
+from django.utils import timezone
 from postgrest import Client
 
 from .exceptions import ConfigurationError, SupabaseAPIError
@@ -27,6 +28,7 @@ class SupabaseClient:
         self.jwt = config.get('JWT')
         self.cache_timeout = config.get('CACHE_TIMEOUT', 300)  # 5 minutes default
         self.retention_days = config.get('RETENTION_DAYS', 60)
+        self.client = None
 
         if self.url and self.jwt:
             self.client = Client(f"{self.url}/rest/v1")
@@ -57,7 +59,7 @@ class SupabaseClient:
             '90d': timedelta(days=90),
         }
         delta = range_map.get(date_range, timedelta(days=7))
-        return datetime.now() - delta
+        return timezone.now() - delta
 
     def get_dashboard_stats(self, date_range: str = '7d') -> Dict[str, Any]:
         """
@@ -100,7 +102,7 @@ class SupabaseClient:
             logger.debug(f"Cached dashboard stats: {cache_key}")
             return stats
         except Exception as e:
-            raise SupabaseAPIError(f"Failed to fetch dashboard stats: {str(e)}")
+            raise SupabaseAPIError(f"Failed to fetch dashboard stats in get_dashboard_stats(): {str(e)}")
 
     def _fetch_dashboard_stats(self, date_range: str) -> Dict[str, Any]:
         """
@@ -162,7 +164,7 @@ class SupabaseClient:
             logger.debug(f"Cached emails list: {cache_key}")
             return emails
         except Exception as e:
-            raise SupabaseAPIError(f"Failed to fetch emails: {str(e)}")
+            raise SupabaseAPIError(f"Failed to fetch emails in get_emails(): {str(e)}")
 
     def _fetch_emails(self, date_range: str, search: Optional[str]) -> List[Dict[str, Any]]:
         """
@@ -219,7 +221,7 @@ class SupabaseClient:
             logger.debug(f"Cached email detail: {cache_key}")
             return detail
         except Exception as e:
-            raise SupabaseAPIError(f"Failed to fetch email detail: {str(e)}")
+            raise SupabaseAPIError(f"Failed to fetch email detail in get_email_detail(): {str(e)}")
 
     def _fetch_email_detail(self, email_id: str) -> Dict[str, Any]:
         """
