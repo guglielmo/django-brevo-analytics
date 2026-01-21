@@ -167,8 +167,8 @@
 {% block breadcrumbs %}
 <div class="breadcrumbs">
     <a href="{% url 'admin:index' %}">Home</a>
-    &rsaquo; <a href="{% url 'admin:app_list' app_label='brevo_analytics' %}">Brevo Analytics</a>
-    &rsaquo; <a href="{% url 'admin:brevo_analytics_brevoorgtransactionalemail_changelist' %}">Emails</a>
+    &rsaquo; <a href="{% url 'admin:brevo_analytics_brevoemail_changelist' %}">Brevo Analytics</a>
+    &rsaquo; <a href="{% url 'admin:brevo_analytics_email_list' %}">Email List</a>
     &rsaquo; {{ email.recipient }}
 </div>
 {% endblock %}
