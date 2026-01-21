@@ -1,7 +1,7 @@
 {% extends "admin/base_site.html" %}
-{% load static %}
+{% load static brevo_filters %}
 
-{% block title %}Email Detail - {{ email.recipient }}{% endblock %}
+{% block title %}Email Detail - {{ email.recipient_email }}{% endblock %}
 
 {% block extrastyle %}
 <style>
@@ -213,7 +213,7 @@
                     <div class="timeline-item">
                         <div class="timeline-marker {{ event.event_type }}"></div>
                         <div class="timeline-content {{ event.event_type }}">
-                            <div class="event-type">{{ event.event_type|replace:"_":" " }}</div>
+                            <div class="event-type">{{ event.event_type|format_event_type }}</div>
                             <div class="event-date">{{ event.event_date|date:"Y-m-d H:i:s" }}</div>
 
                             {% if event.event_type == "clicked" and event.link %}

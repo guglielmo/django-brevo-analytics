@@ -162,3 +162,45 @@ def time_since_sent(sent_time):
 
     years = days // 365
     return f"{years}y ago"
+
+
+@register.filter
+def replace(value, arg):
+    """
+    Replace occurrences of a substring in a string.
+
+    Usage: {{ "hello_world"|replace:"_: " }}
+
+    Args:
+        value: The string to search in
+        arg: String in format "search:replace" (separated by colon)
+
+    Returns:
+        String with replacements made
+    """
+    if not value or not arg:
+        return value
+
+    try:
+        search, replace_with = arg.split(':', 1)
+        return str(value).replace(search, replace_with)
+    except (ValueError, AttributeError):
+        return value
+
+
+@register.filter
+def format_event_type(event_type):
+    """
+    Format event type for display (e.g., 'hard_bounce' -> 'Hard Bounce').
+
+    Args:
+        event_type: String representing the event type
+
+    Returns:
+        Formatted string
+    """
+    if not event_type:
+        return ""
+
+    # Replace underscores with spaces and capitalize each word
+    return str(event_type).replace('_', ' ').title()
