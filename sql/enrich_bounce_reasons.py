@@ -55,32 +55,58 @@ def fetch_bounce_reason(
     """
     from datetime import datetime, timedelta
 
-    # Map bounce_type to API event name
+    # Map bounce_type to API event name (camelCase format)
     api_event = 'hardBounces' if bounce_type == 'hard' else 'softBounces'
 
     # Parse timestamp to create search window (Brevo requires YYYY-MM-DD)
     try:
-        event_dt = datetime.fromisoformat(event_timestamp.replace('Z', '+00:00'))
+        # DuckDB may return datetime object or string
+        if isinstance(event_timestamp, datetime):
+            event_dt = event_timestamp
+        elif isinstance(event_timestamp, str):
+            # Handle both ISO format and simple "YYYY-MM-DD HH:MM:SS" format
+            if 'T' in event_timestamp:
+                event_dt = datetime.fromisoformat(event_timestamp.replace('Z', '+00:00'))
+            else:
+                # Simple format: "2026-01-20 12:50:28"
+                event_dt = datetime.strptime(event_timestamp, '%Y-%m-%d %H:%M:%S')
+        else:
+            raise ValueError(f"Unexpected timestamp type: {type(event_timestamp)}")
+
         # Search window: same day ± 1 day for safety
-        start_date = (event_dt - timedelta(days=1)).strftime('%Y-%m-%d')
-        end_date = (event_dt + timedelta(days=1)).strftime('%Y-%m-%d')
+        start_date_dt = event_dt - timedelta(days=1)
+        end_date_dt = event_dt + timedelta(days=1)
+
+        # IMPORTANT: Brevo API rejects endDate > today
+        today = datetime.now()
+        if end_date_dt > today:
+            end_date_dt = today
+
+        start_date = start_date_dt.strftime('%Y-%m-%d')
+        end_date = end_date_dt.strftime('%Y-%m-%d')
+
     except Exception as e:
         print(f"    Warning: Could not parse timestamp {event_timestamp}: {e}", file=sys.stderr)
-        # Fallback: January 2026
-        start_date = '2026-01-01'
-        end_date = '2026-01-31'
+        # Fallback: use wide window up to today
+        today = datetime.now()
+        start_date = (today - timedelta(days=30)).strftime('%Y-%m-%d')
+        end_date = today.strftime('%Y-%m-%d')
 
     headers = {
         'api-key': api_key,
         'accept': 'application/json'
     }
 
-    # Clean message ID (remove angle brackets if present)
-    clean_mid = brevo_message_id.strip('<>').strip()
+    # Keep angle brackets - Brevo API requires them!
+    # If brackets are missing, add them
+    if not brevo_message_id.startswith('<'):
+        message_id_param = f"<{brevo_message_id}>"
+    else:
+        message_id_param = brevo_message_id
 
     params = {
         'event': api_event,
-        'messageId': clean_mid,  # TARGETED QUERY - only this message
+        'messageId': message_id_param,  # TARGETED QUERY - only this message
         'startDate': start_date,
         'endDate': end_date,
         'limit': 10,  # Should only be 1 result
@@ -112,7 +138,7 @@ def fetch_bounce_reason(
         events = data.get('events', [])
 
         if not events:
-            print(f"    No events found for messageId={clean_mid[:40]}...", file=sys.stderr)
+            print(f"    No events found for messageId={message_id_param[:50]}...", file=sys.stderr)
             return None
 
         # Get reason from first matching event
