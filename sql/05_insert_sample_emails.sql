@@ -118,9 +118,9 @@ BEGIN
 
     -- Events for Email 2: Delivery, open, and click
     INSERT INTO brevo_analytics.email_events (email_id, event_type, event_timestamp, click_url) VALUES
-        (v_email_id_2, 'sent', NOW() - INTERVAL '5 hours'),
-        (v_email_id_2, 'delivered', NOW() - INTERVAL '4 hours 58 minutes'),
-        (v_email_id_2, 'opened', NOW() - INTERVAL '4 hours 30 minutes'),
+        (v_email_id_2, 'sent', NOW() - INTERVAL '5 hours', NULL),
+        (v_email_id_2, 'delivered', NOW() - INTERVAL '4 hours 58 minutes', NULL),
+        (v_email_id_2, 'opened', NOW() - INTERVAL '4 hours 30 minutes', NULL),
         (v_email_id_2, 'clicked', NOW() - INTERVAL '4 hours 25 minutes', 'https://infoparlamento.it/votes/2026-01-vote-123');
 
     -- Events for Email 3: Hard bounce
