@@ -2786,6 +2786,680 @@ git commit -m "chore: prepare package for distribution
 
 ---
 
+## Task 14: Internationalization and Localization
+
+**Files:**
+- Modify: `brevo_analytics/apps.py`
+- Create: `brevo_analytics/locale/it/LC_MESSAGES/django.po`
+- Modify: All template files in `brevo_analytics/templates/`
+- Modify: `brevo_analytics/admin.py`
+- Modify: `brevo_analytics/views.py`
+
+**Step 1: Configure Django app for i18n**
+
+Edit `brevo_analytics/apps.py`:
+```python
+from django.apps import AppConfig
+
+
+class BrevoAnalyticsConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'brevo_analytics'
+    verbose_name = 'Brevo Analytics'
+
+    def ready(self):
+        """Configure locale path when app is ready."""
+        import os
+        from django.conf import settings
+
+        # Add package locale directory to LOCALE_PATHS
+        locale_path = os.path.join(os.path.dirname(__file__), 'locale')
+        if hasattr(settings, 'LOCALE_PATHS'):
+            if locale_path not in settings.LOCALE_PATHS:
+                settings.LOCALE_PATHS = list(settings.LOCALE_PATHS) + [locale_path]
+        else:
+            settings.LOCALE_PATHS = [locale_path]
+```
+
+**Step 2: Mark template strings for translation in dashboard.html**
+
+Edit `brevo_analytics/templates/admin/brevo_analytics/dashboard.html`:
+```html
+{% extends "admin/base_site.html" %}
+{% load static i18n %}
+
+{% block title %}{% trans "Brevo Analytics Dashboard" %}{% endblock %}
+
+<!-- Update all visible text with {% trans %} tags -->
+<div class="date-range-filter">
+  <strong>{% trans "Date Range:" %}</strong>
+  <a href="?range=24h" {% if date_range == '24h' %}class="active"{% endif %}>{% trans "24 Hours" %}</a>
+  <a href="?range=7d" {% if date_range == '7d' %}class="active"{% endif %}>{% trans "7 Days" %}</a>
+  <a href="?range=30d" {% if date_range == '30d' %}class="active"{% endif %}>{% trans "30 Days" %}</a>
+  <a href="?range=90d" {% if date_range == '90d' %}class="active"{% endif %}>{% trans "90 Days" %}</a>
+</div>
+
+<div class="stat-card">
+  <h3>{% trans "Total Sent" %}</h3>
+  <!-- ... -->
+</div>
+
+<div class="stat-card">
+  <h3>{% trans "Delivery Rate" %}</h3>
+  <!-- ... -->
+</div>
+
+<div class="stat-card">
+  <h3>{% trans "Bounce Rate" %}</h3>
+  <!-- ... -->
+</div>
+
+<div class="stat-card">
+  <h3>{% trans "Avg Delivery Time" %}</h3>
+  <!-- ... -->
+</div>
+
+<div class="dashboard-actions">
+  <h2>{% trans "Actions" %}</h2>
+  <p>{% trans "View detailed email delivery information and search for specific recipients." %}</p>
+  <a href="{% url 'admin:brevo_analytics_email_list' %}?range={{ date_range }}">{% trans "View Email List" %} &rarr;</a>
+</div>
+
+<div class="no-data">
+  <h2>{% trans "No Data Available" %}</h2>
+  <p>{% trans "Unable to load analytics data at this time. Please check your configuration or try again later." %}</p>
+</div>
+```
+
+**Step 3: Mark template strings for translation in email_list.html**
+
+Edit `brevo_analytics/templates/admin/brevo_analytics/email_list.html`:
+```html
+{% extends "admin/base_site.html" %}
+{% load static brevo_filters i18n %}
+
+{% block title %}{% trans "Email List" %}{% endblock %}
+
+<div class="list-header">
+    <h1>{% trans "Email List" %}</h1>
+    <form method="get" class="search-form">
+        <input type="text" name="q" placeholder="{% trans 'Search by recipient or subject' %}" value="{{ request.GET.q }}">
+        <input type="date" name="date_from" placeholder="{% trans 'From date' %}" value="{{ request.GET.date_from }}">
+        <input type="date" name="date_to" placeholder="{% trans 'To date' %}" value="{{ request.GET.date_to }}">
+        <button type="submit">{% trans "Filter" %}</button>
+        {% if request.GET.q or request.GET.date_from or request.GET.date_to %}
+            <a href="{% url 'admin:brevo_analytics_email_list' %}">{% trans "Clear" %}</a>
+        {% endif %}
+    </form>
+</div>
+
+<table id="emailTable" class="display" style="width:100%">
+    <thead>
+        <tr>
+            <th>{% trans "Recipient" %}</th>
+            <th>{% trans "Template" %}</th>
+            <th>{% trans "Subject" %}</th>
+            <th>{% trans "Sent Date" %}</th>
+            <th>{% trans "Age" %}</th>
+            <th>{% trans "Status" %}</th>
+        </tr>
+    </thead>
+    <!-- ... -->
+</table>
+
+<div class="no-data">
+    <p>{% trans "No emails found." %}</p>
+    {% if request.GET.q or request.GET.date_from or request.GET.date_to %}
+        <p>{% trans "Try adjusting your search filters." %}</p>
+    {% endif %}
+</div>
+
+<script>
+    $(document).ready(function() {
+        var table = $('#emailTable').DataTable({
+            order: [[3, 'desc']],
+            pageLength: 25,
+            lengthMenu: [[25, 50, 100], [25, 50, 100]],
+            language: {
+                search: "{% trans 'Search table:' %}",
+                lengthMenu: "{% trans 'Show _MENU_ entries' %}",
+                info: "{% trans 'Showing _START_ to _END_ of _TOTAL_ emails' %}",
+                infoEmpty: "{% trans 'No emails to display' %}",
+                infoFiltered: "{% trans '(filtered from _MAX_ total emails)' %}",
+                zeroRecords: "{% trans 'No matching emails found' %}"
+            },
+            columnDefs: [
+                { orderable: true, targets: [0, 1, 2, 3, 4, 5] }
+            ]
+        });
+
+        // Make rows clickable
+        $('#emailTable tbody').on('click', 'tr', function() {
+            var url = $(this).data('url');
+            if (url) {
+                window.location.href = url;
+            }
+        });
+    });
+</script>
+```
+
+**Step 4: Mark template strings for translation in email_detail.html**
+
+Edit `brevo_analytics/templates/admin/brevo_analytics/email_detail.html`:
+```html
+{% extends "admin/base_site.html" %}
+{% load static brevo_filters i18n %}
+
+{% block title %}{% trans "Email Detail" %} - {{ email.recipient_email }}{% endblock %}
+
+<div class="email-detail-container">
+    <a href="{% url 'admin:brevo_analytics_email_list' %}" class="back-button">
+        &larr; {% trans "Back to Email List" %}
+    </a>
+
+    <div class="email-header">
+        <h1>{% trans "Email Details" %}</h1>
+        <div class="email-meta">
+            <div class="meta-item">
+                <span class="meta-label">{% trans "Recipient" %}</span>
+                <span class="meta-value">{{ email.recipient_email }}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">{% trans "Template" %}</span>
+                <span class="meta-value">{{ email.template_name|default:"—" }}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">{% trans "Subject" %}</span>
+                <span class="meta-value">{{ email.subject|default:"—" }}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">{% trans "Sent Date" %}</span>
+                <span class="meta-value">{{ email.sent_at|date:"H:i d/m/Y" }}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">{% trans "Brevo Message ID" %}</span>
+                <span class="meta-value">{{ email.brevo_email_id|default:"—" }}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="events-section">
+        <h2>{% trans "Event Timeline" %}</h2>
+
+        <div class="timeline-legend">
+            <div class="legend-item">
+                <div class="legend-dot sent"></div>
+                <span>{% trans "Sent" %}</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot delivered"></div>
+                <span>{% trans "Delivered" %}</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot opened"></div>
+                <span>{% trans "Opened" %}</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot clicked"></div>
+                <span>{% trans "Clicked" %}</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot bounced"></div>
+                <span>{% trans "Bounced" %}</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot unsubscribed"></div>
+                <span>{% trans "Unsubscribed" %}</span>
+            </div>
+        </div>
+
+        {% if events %}
+            <div class="timeline">
+                {% for event in events %}
+                    <div class="timeline-item">
+                        <div class="timeline-marker {{ event.event_type }}"></div>
+                        <div class="timeline-content {{ event.event_type }}">
+                            <div class="event-type">{{ event.event_type|format_event_type }}</div>
+                            <div class="event-date">{{ event.event_timestamp|smart_timestamp }}</div>
+
+                            {% if event.event_type == "clicked" and event.click_url %}
+                                <div class="event-details">
+                                    <strong>{% trans "Link:" %}</strong> <a href="{{ event.click_url }}" target="_blank">{{ event.click_url }}</a>
+                                </div>
+                            {% endif %}
+
+                            {% if event.event_type == "bounced" %}
+                                <div class="bounce-details">
+                                    {% if event.bounce_type %}
+                                        <div><strong>{% trans "Bounce Type:" %}</strong> {{ event.bounce_type }}</div>
+                                    {% endif %}
+                                    {% if event.bounce_reason %}
+                                        <div><strong>{% trans "Reason:" %}</strong> {{ event.bounce_reason }}</div>
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p>{% trans "No events recorded for this email yet." %}</p>
+        {% endif %}
+    </div>
+</div>
+```
+
+**Step 5: Mark Python strings for translation**
+
+Edit `brevo_analytics/admin.py`:
+```python
+from django.contrib import admin
+from django.utils.translation import gettext_lazy as _
+from .models import BrevoEmail
+
+class BrevoEmailAdmin(admin.ModelAdmin):
+    # Virtual model admin configuration
+    change_list_template = 'admin/brevo_analytics/dashboard.html'
+
+    class Media:
+        css = {
+            'all': ('brevo_analytics/css/admin.css',)
+        }
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+admin.site.register(BrevoEmail, BrevoEmailAdmin)
+
+# Update verbose names in models.py as well
+```
+
+Edit `brevo_analytics/models.py`:
+```python
+from django.db import models
+from django.utils.translation import gettext_lazy as _
+
+
+class BrevoEmail(models.Model):
+    """Virtual model for Django admin integration (no database table)."""
+
+    recipient_email = models.EmailField(_("Recipient Email"))
+    template_name = models.CharField(_("Template Name"), max_length=255, blank=True)
+    subject = models.CharField(_("Subject"), max_length=255, blank=True)
+    sent_at = models.DateTimeField(_("Sent At"))
+    brevo_email_id = models.CharField(_("Brevo Message ID"), max_length=255, blank=True)
+
+    class Meta:
+        managed = False
+        verbose_name = _("Brevo Email")
+        verbose_name_plural = _("Brevo Analytics")
+        app_label = 'brevo_analytics'
+
+    def __str__(self):
+        return f"{self.recipient_email} - {self.sent_at}"
+```
+
+Edit `brevo_analytics/views.py` to add translations to messages:
+```python
+from django.utils.translation import gettext_lazy as _
+from django.contrib import messages
+
+# In dashboard_view:
+messages.error(request, _('Brevo Analytics is not configured. Please check your settings.'))
+messages.error(request, _('Failed to load analytics data. Please try again later.'))
+
+# In email_list_view:
+messages.error(request, _('Brevo Analytics is not configured. Please check your settings.'))
+messages.error(request, _('Failed to load email list. Please try again later.'))
+
+# In email_detail_view:
+messages.error(request, _('Brevo Analytics is not configured. Please check your settings.'))
+messages.error(request, _('Email not found.'))
+messages.error(request, _('Failed to load email details. Please try again later.'))
+```
+
+**Step 6: Create locale directory structure**
+
+Run:
+```bash
+cd /home/gu/Workspace/lab.prototypes/brevo-analytics
+mkdir -p brevo_analytics/locale/it/LC_MESSAGES
+```
+
+**Step 7: Generate translation template (.pot) and Italian .po file**
+
+Run:
+```bash
+cd /home/gu/Workspace/lab.prototypes/brevo-analytics
+django-admin makemessages -l it -d django --settings=brevo_analytics.settings
+```
+
+If you don't have a settings module, create a temporary one:
+```bash
+# Alternative: use python manage.py from host project
+cd /home/gu/Workspace/infoparlamento
+python manage.py makemessages -l it --ignore=env/* --ignore=venv/*
+```
+
+**Step 8: Translate strings in Italian**
+
+Edit `brevo_analytics/locale/it/LC_MESSAGES/django.po` and add Italian translations:
+```po
+# Brevo Analytics Italian Translation
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: it\n"
+
+msgid "Brevo Analytics Dashboard"
+msgstr "Dashboard Brevo Analytics"
+
+msgid "Date Range:"
+msgstr "Intervallo di date:"
+
+msgid "24 Hours"
+msgstr "24 Ore"
+
+msgid "7 Days"
+msgstr "7 Giorni"
+
+msgid "30 Days"
+msgstr "30 Giorni"
+
+msgid "90 Days"
+msgstr "90 Giorni"
+
+msgid "Total Sent"
+msgstr "Totale inviate"
+
+msgid "Delivery Rate"
+msgstr "Tasso di consegna"
+
+msgid "Bounce Rate"
+msgstr "Tasso di rimbalzo"
+
+msgid "Avg Delivery Time"
+msgstr "Tempo medio di consegna"
+
+msgid "Actions"
+msgstr "Azioni"
+
+msgid "View detailed email delivery information and search for specific recipients."
+msgstr "Visualizza informazioni dettagliate sulla consegna delle email e cerca destinatari specifici."
+
+msgid "View Email List"
+msgstr "Visualizza elenco email"
+
+msgid "No Data Available"
+msgstr "Nessun dato disponibile"
+
+msgid "Unable to load analytics data at this time. Please check your configuration or try again later."
+msgstr "Impossibile caricare i dati analitici al momento. Controlla la configurazione o riprova più tardi."
+
+msgid "Email List"
+msgstr "Elenco email"
+
+msgid "Search by recipient or subject"
+msgstr "Cerca per destinatario o oggetto"
+
+msgid "From date"
+msgstr "Data inizio"
+
+msgid "To date"
+msgstr "Data fine"
+
+msgid "Filter"
+msgstr "Filtra"
+
+msgid "Clear"
+msgstr "Cancella"
+
+msgid "Recipient"
+msgstr "Destinatario"
+
+msgid "Template"
+msgstr "Template"
+
+msgid "Subject"
+msgstr "Oggetto"
+
+msgid "Sent Date"
+msgstr "Data invio"
+
+msgid "Age"
+msgstr "Età"
+
+msgid "Status"
+msgstr "Stato"
+
+msgid "No emails found."
+msgstr "Nessuna email trovata."
+
+msgid "Try adjusting your search filters."
+msgstr "Prova a modificare i filtri di ricerca."
+
+msgid "Search table:"
+msgstr "Cerca nella tabella:"
+
+msgid "Show _MENU_ entries"
+msgstr "Mostra _MENU_ voci"
+
+msgid "Showing _START_ to _END_ of _TOTAL_ emails"
+msgstr "Visualizzazione da _START_ a _END_ di _TOTAL_ email"
+
+msgid "No emails to display"
+msgstr "Nessuna email da visualizzare"
+
+msgid "(filtered from _MAX_ total emails)"
+msgstr "(filtrato da _MAX_ email totali)"
+
+msgid "No matching emails found"
+msgstr "Nessuna email corrispondente trovata"
+
+msgid "Email Detail"
+msgstr "Dettaglio email"
+
+msgid "Back to Email List"
+msgstr "Torna all'elenco email"
+
+msgid "Email Details"
+msgstr "Dettagli email"
+
+msgid "Brevo Message ID"
+msgstr "ID messaggio Brevo"
+
+msgid "Event Timeline"
+msgstr "Cronologia eventi"
+
+msgid "Sent"
+msgstr "Inviata"
+
+msgid "Delivered"
+msgstr "Consegnata"
+
+msgid "Opened"
+msgstr "Aperta"
+
+msgid "Clicked"
+msgstr "Cliccata"
+
+msgid "Bounced"
+msgstr "Rimbalzata"
+
+msgid "Unsubscribed"
+msgstr "Disiscritto"
+
+msgid "Link:"
+msgstr "Link:"
+
+msgid "Bounce Type:"
+msgstr "Tipo di rimbalzo:"
+
+msgid "Reason:"
+msgstr "Motivo:"
+
+msgid "No events recorded for this email yet."
+msgstr "Nessun evento registrato per questa email."
+
+msgid "Brevo Analytics is not configured. Please check your settings."
+msgstr "Brevo Analytics non è configurato. Controlla le impostazioni."
+
+msgid "Failed to load analytics data. Please try again later."
+msgstr "Impossibile caricare i dati analitici. Riprova più tardi."
+
+msgid "Failed to load email list. Please try again later."
+msgstr "Impossibile caricare l'elenco email. Riprova più tardi."
+
+msgid "Email not found."
+msgstr "Email non trovata."
+
+msgid "Failed to load email details. Please try again later."
+msgstr "Impossibile caricare i dettagli dell'email. Riprova più tardi."
+
+msgid "Brevo Email"
+msgstr "Email Brevo"
+
+msgid "Brevo Analytics"
+msgstr "Brevo Analytics"
+
+msgid "Recipient Email"
+msgstr "Email destinatario"
+
+msgid "Template Name"
+msgstr "Nome template"
+
+msgid "Sent At"
+msgstr "Inviata il"
+```
+
+**Step 9: Compile message catalogs**
+
+Run:
+```bash
+cd /home/gu/Workspace/lab.prototypes/brevo-analytics
+django-admin compilemessages -l it
+
+# Or from host project:
+cd /home/gu/Workspace/infoparlamento
+python manage.py compilemessages -l it
+```
+
+This creates `brevo_analytics/locale/it/LC_MESSAGES/django.mo`
+
+**Step 10: Update package setup to include locale files**
+
+Edit `setup.py` to ensure locale files are included:
+```python
+from setuptools import setup, find_packages
+
+setup(
+    name='django-brevo-analytics',
+    version='0.1.0',
+    packages=find_packages(),
+    include_package_data=True,
+    package_data={
+        'brevo_analytics': [
+            'locale/*/LC_MESSAGES/*.po',
+            'locale/*/LC_MESSAGES/*.mo',
+            'templates/**/*.html',
+            'static/**/*',
+        ],
+    },
+    # ... rest of setup.py
+)
+```
+
+Create/update `MANIFEST.in`:
+```
+include README.md
+include LICENSE
+include requirements.txt
+recursive-include brevo_analytics/templates *
+recursive-include brevo_analytics/static *
+recursive-include brevo_analytics/locale *
+```
+
+**Step 11: Update documentation with i18n information**
+
+Edit `README.md` to add localization section:
+```markdown
+## Localization
+
+The package includes Italian translations by default. To use a different language:
+
+1. Set `LANGUAGE_CODE` in your Django settings:
+   ```python
+   LANGUAGE_CODE = 'it'  # Italian
+   ```
+
+2. Ensure Django's i18n middleware is enabled:
+   ```python
+   MIDDLEWARE = [
+       # ...
+       'django.middleware.locale.LocaleMiddleware',
+       # ...
+   ]
+   ```
+
+### Adding More Languages
+
+To add translations for other languages:
+
+```bash
+cd your-project-root
+python manage.py makemessages -l es -d django  # Spanish example
+# Edit brevo_analytics/locale/es/LC_MESSAGES/django.po
+python manage.py compilemessages -l es
+```
+
+Supported languages:
+- Italian (it) - included
+- English (en) - fallback (source strings)
+```
+
+**Step 12: Test localization**
+
+In the host project settings (`config/settings/base.py`), verify:
+```python
+USE_I18N = True
+USE_L10N = True
+USE_TZ = True
+
+LANGUAGE_CODE = 'it'
+
+MIDDLEWARE = [
+    # ...
+    'django.middleware.locale.LocaleMiddleware',
+    # ...
+]
+```
+
+**Step 13: Commit localization changes**
+
+Run:
+```bash
+git add brevo_analytics/locale/ brevo_analytics/apps.py brevo_analytics/templates/ brevo_analytics/admin.py brevo_analytics/views.py brevo_analytics/models.py setup.py MANIFEST.in README.md
+git commit -m "feat: add Italian localization
+
+- Mark all template strings for translation with {% trans %}
+- Mark Python strings with gettext_lazy
+- Generate Italian .po translations
+- Compile message catalogs
+- Update package setup to include locale files
+- Add i18n documentation to README
+
+All user-facing strings now support i18n with Italian as default language."
+```
+
+---
+
 ## Summary
 
 This implementation plan provides a complete, production-ready Django package for Brevo Analytics. The package:
@@ -2795,9 +3469,10 @@ This implementation plan provides a complete, production-ready Django package fo
 3. **Provides three views**: dashboard, email list, email detail
 4. **Handles errors gracefully** with cache fallback
 5. **Uses modern frontend libraries** (Chart.js, DataTables) via CDN
-6. **Includes comprehensive documentation** for installation and setup
-7. **Follows Django best practices** for reusable apps
-8. **Ready for PyPI distribution** with proper packaging
+6. **Supports internationalization** with Italian translations included
+7. **Includes comprehensive documentation** for installation and setup
+8. **Follows Django best practices** for reusable apps
+9. **Ready for PyPI distribution** with proper packaging
 
 ### Key Features Implemented
 
@@ -2810,6 +3485,7 @@ This implementation plan provides a complete, production-ready Django package fo
 ✅ Error handling and fallback
 ✅ CSS styling
 ✅ Template filters
+✅ Italian localization (i18n)
 ✅ Complete documentation
 ✅ Package distribution setup
 
