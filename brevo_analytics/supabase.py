@@ -339,6 +339,11 @@ class SupabaseClient:
                 else:
                     email['current_status'] = 'sent'
 
+        # Convert sent_at strings to datetime objects
+        for email in emails:
+            if 'sent_at' in email and isinstance(email['sent_at'], str):
+                email['sent_at'] = datetime.fromisoformat(email['sent_at'].replace('Z', '+00:00'))
+
         return emails
 
     def get_email_detail(self, email_id: str) -> Dict[str, Any]:
@@ -402,10 +407,14 @@ class SupabaseClient:
         if not email_data:
             raise SupabaseAPIError(f"Email {email_id} not found")
 
-        # Debug: log what we got from database
-        logger.info(f"Email data from DB: {email_data[0] if email_data else 'None'}")
-        if email_data:
-            logger.info(f"sent_at field: {email_data[0].get('sent_at', 'MISSING')}")
+        # Convert ISO datetime strings to datetime objects
+        email = email_data[0]
+        if 'sent_at' in email and isinstance(email['sent_at'], str):
+            email['sent_at'] = datetime.fromisoformat(email['sent_at'].replace('Z', '+00:00'))
+        if 'created_at' in email and isinstance(email['created_at'], str):
+            email['created_at'] = datetime.fromisoformat(email['created_at'].replace('Z', '+00:00'))
+        if 'updated_at' in email and isinstance(email['updated_at'], str):
+            email['updated_at'] = datetime.fromisoformat(email['updated_at'].replace('Z', '+00:00'))
 
         # Fetch all events for this email
         events_data = self._get('email_events', {
@@ -414,7 +423,14 @@ class SupabaseClient:
             'order': 'event_timestamp.asc'
         })
 
+        # Convert event timestamps to datetime objects
+        for event in events_data:
+            if 'event_timestamp' in event and isinstance(event['event_timestamp'], str):
+                event['event_timestamp'] = datetime.fromisoformat(event['event_timestamp'].replace('Z', '+00:00'))
+            if 'created_at' in event and isinstance(event['created_at'], str):
+                event['created_at'] = datetime.fromisoformat(event['created_at'].replace('Z', '+00:00'))
+
         return {
-            'email': email_data[0],
+            'email': email,
             'events': events_data
         }
