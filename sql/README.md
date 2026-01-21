@@ -80,14 +80,17 @@ BREVO_JWT=<your-generated-jwt-token>
 
 ```bash
 # Test with curl
-curl "https://fvuhpocdeckmbdgiebfy.supabase.co/rest/v1/brevo_analytics.emails?select=*&limit=1" \
+curl "https://fvuhpocdeckmbdgiebfy.supabase.co/rest/v1/emails?select=*&limit=1" \
   -H "apikey: YOUR_ANON_KEY" \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Accept-Profile: brevo_analytics"
 ```
 
 **Expected result:**
 - Success: Returns JSON array with emails (or empty `[]` if no data)
 - RLS working: Only returns emails for the client_id in your JWT
+
+**Note:** The `Accept-Profile: brevo_analytics` header tells PostgREST to use the `brevo_analytics` schema instead of the default `public` schema.
 
 ### Restart Django
 
