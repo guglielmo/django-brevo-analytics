@@ -272,7 +272,10 @@
                         <div class="timeline-marker {{ event.event_type }}"></div>
                         <div class="timeline-content {{ event.event_type }}">
                             <div class="event-type">{{ event.event_type|format_event_type }}</div>
-                            <div class="event-date">{{ event.event_timestamp|date:"Y-m-d H:i:s" }}</div>
+                            <div class="event-date">
+                                {{ event.event_timestamp|date:"Y-m-d H:i:s" }}
+                                <span style="color: #999; margin-left: 8px;">({{ event.event_timestamp|time_since_sent }})</span>
+                            </div>
 
                             {% if event.event_type == "clicked" and event.click_url %}
                                 <div class="event-details">
