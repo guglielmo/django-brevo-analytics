@@ -204,3 +204,62 @@ def format_event_type(event_type):
 
     # Replace underscores with spaces and capitalize each word
     return str(event_type).replace('_', ' ').title()
+
+
+@register.filter
+def smart_timestamp(timestamp):
+    """
+    Format timestamp with relative time and absolute time.
+
+    - If today (after midnight): "6h ago - 05:55"
+    - If before today: "32h ago - 20/01 14:43"
+
+    Args:
+        timestamp: datetime object or ISO format string
+
+    Returns:
+        Formatted string
+    """
+    if not timestamp:
+        return "N/A"
+
+    # Convert string to datetime if needed
+    if isinstance(timestamp, str):
+        try:
+            timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+        except (ValueError, AttributeError):
+            return "N/A"
+
+    # Make sure we have a timezone-aware datetime
+    if timestamp.tzinfo is None:
+        timestamp = timezone.make_aware(timestamp)
+
+    now = timezone.now()
+    delta = now - timestamp
+
+    # Handle future dates
+    if delta.total_seconds() < 0:
+        return "just now"
+
+    # Calculate relative time
+    seconds = int(delta.total_seconds())
+
+    if seconds < 60:
+        relative = f"{seconds}s ago"
+    elif seconds < 3600:
+        relative = f"{seconds // 60}m ago"
+    else:
+        relative = f"{seconds // 3600}h ago"
+
+    # Get today's midnight
+    today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Format absolute time based on whether it's today or before
+    if timestamp >= today_midnight:
+        # Today: show only HH:MM
+        absolute = timestamp.strftime("%H:%M")
+    else:
+        # Before today: show dd/MM HH:MM
+        absolute = timestamp.strftime("%d/%m %H:%M")
+
+    return f"{relative} - {absolute}"
