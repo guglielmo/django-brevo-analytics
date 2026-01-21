@@ -53,6 +53,69 @@ head -3 email_events_import.csv
 wc -l emails_import.csv email_events_import.csv
 ```
 
+### Step 3: Arricchisci Bounce Events con Motivi (Opzionale ma Consigliato)
+
+Il CSV esportato da Brevo non contiene i motivi dettagliati dei bounce. Per ottenerli:
+
+```bash
+# Ottieni API key da Brevo dashboard
+# https://app.brevo.com/settings/keys/api
+
+python3 sql/enrich_bounce_reasons.py YOUR_BREVO_API_KEY
+```
+
+**Cosa fa questo script:**
+1. JOIN di `emails_import.csv` + `email_events_import.csv`
+2. Per ogni bounce (31 eventi), query mirata API Brevo con `messageId`
+3. Recupera campo `reason` (es: "550 5.1.1 User unknown")
+4. Aggiorna `bounce_reason` in `email_events_import.csv`
+
+**Output atteso:**
+```
+Brevo Bounce Reason Enrichment
+============================================================
+
+Strategy:
+  1. JOIN emails_import.csv + email_events_import.csv
+  2. Query Brevo API with messageId filter (targeted)
+  3. Update bounce_reason in email_events_import.csv
+
+Loading email ID mappings from emails_import.csv...
+  Loaded 3394 email mappings
+
+Reading events from email_events_import.csv...
+  Loaded 47482 events
+  Found 31 bounce events to enrich
+
+Querying Brevo API for bounce reasons...
+------------------------------------------------------------
+[1/31] Bounce hard - messageId=<202601050823.76883290496@smtp-relay...
+    ✓ Reason: 550 5.1.1 <user@domain.com>: Recipient address rejected
+[2/31] Bounce soft - messageId=<202601201150.91274853668@smtp-relay...
+    ✓ Reason: 452 4.2.2 Mailbox full
+...
+------------------------------------------------------------
+
+Writing updated events to email_events_import.csv...
+✓ Updated email_events_import.csv
+
+============================================================
+Enrichment Summary:
+  Total bounce events:  31
+  Enriched with reason: 28
+  Failed to fetch:      3
+============================================================
+
+✓ Success! You can now import email_events_import.csv to Supabase
+  with bounce_reason populated for bounce events.
+```
+
+**Note:**
+- Script fa query **mirate** (messageId filter), non scarica tutti i dati
+- Rate limit: 200ms tra richieste (max 5/sec)
+- Tempo stimato: ~6 secondi per 31 bounce events
+- Se fallisce qualche query, bounce_reason rimane NULL (puoi importare comunque)
+
 ---
 
 ## Fase 2: Import in Supabase (Dashboard)
@@ -72,11 +135,8 @@ wc -l emails_import.csv email_events_import.csv
    client_id           → client_id (uuid)
    brevo_email_id      → brevo_email_id (text)
    recipient_email     → recipient_email (text)
-   template_id         → template_id (text) [nullable]
-   template_name       → template_name (text) [nullable]
    subject             → subject (text)
    sent_at             → sent_at (timestamptz)
-   tags                → tags (text[]) [può restare vuoto]
    ```
 7. **IMPORTANTE:** Skippa riga header (dovrebbe farlo automaticamente)
 8. Clicca **"Import"**

@@ -87,11 +87,8 @@ def extract_emails(input_csv: str, client_id: str) -> Dict[str, Dict]:
             'client_id': client_id,
             'brevo_email_id': mid,
             'recipient_email': sent_event['email'],
-            'template_id': None,  # Not available in CSV
-            'template_name': None,  # Not available in CSV
             'subject': sent_event['sub'],
-            'sent_at': parse_timestamp(sent_event['ts']),
-            'tags': []  # Tags are always "NA" in this CSV
+            'sent_at': parse_timestamp(sent_event['ts'])
         }
 
     return emails
@@ -149,18 +146,13 @@ def write_emails_csv(emails: Dict[str, Dict], output_file: str):
     """Write emails to CSV file."""
     fieldnames = [
         'id', 'client_id', 'brevo_email_id', 'recipient_email',
-        'template_id', 'template_name', 'subject', 'sent_at', 'tags'
+        'subject', 'sent_at'
     ]
 
     with open(output_file, 'w', encoding='utf-8', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-
-        for email_data in emails.values():
-            # Convert tags array to empty for CSV (or could be JSON string)
-            row = email_data.copy()
-            row['tags'] = ''  # Empty for now, or could use '[]'
-            writer.writerow(row)
+        writer.writerows(emails.values())
 
     print(f"✓ Wrote {len(emails)} emails to {output_file}")
 

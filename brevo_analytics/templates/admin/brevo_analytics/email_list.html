@@ -113,7 +113,6 @@
             <thead>
                 <tr>
                     <th>Recipient</th>
-                    <th>Template</th>
                     <th>Subject</th>
                     <th>Sent Date</th>
                     <th>Age</th>
@@ -124,7 +123,6 @@
                 {% for email in emails %}
                 <tr data-url="{% url 'admin:brevo_analytics_email_detail' email.id %}">
                     <td>{{ email.recipient_email }}</td>
-                    <td>{{ email.template_name|default:"—" }}</td>
                     <td>{{ email.subject|truncatewords:10 }}</td>
                     <td>{{ email.sent_at|date:"Y-m-d H:i" }}</td>
                     <td style="white-space: nowrap;">{{ email.sent_at|time_since_sent }}</td>
