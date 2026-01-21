@@ -226,7 +226,7 @@
             </div>
             <div class="meta-item">
                 <span class="meta-label">Sent Date</span>
-                <span class="meta-value">{{ email.sent_at|date:"Y-m-d H:i:s" }}</span>
+                <span class="meta-value">{{ email.sent_at|date:"H:i d/m/Y" }}</span>
             </div>
             <div class="meta-item">
                 <span class="meta-label">Brevo Message ID</span>
@@ -273,7 +273,7 @@
                         <div class="timeline-content {{ event.event_type }}">
                             <div class="event-type">{{ event.event_type|format_event_type }}</div>
                             <div class="event-date">
-                                {{ event.event_timestamp|date:"Y-m-d H:i:s" }}
+                                {{ event.event_timestamp|date:"H:i d/m/Y" }}
                                 <span style="color: #999; margin-left: 8px;">({{ event.event_timestamp|time_since_sent }})</span>
                             </div>
 
