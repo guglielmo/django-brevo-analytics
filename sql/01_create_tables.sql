@@ -36,11 +36,8 @@ COMMENT ON COLUMN brevo_analytics.clients.slug IS 'URL-friendly identifier for t
 CREATE TABLE IF NOT EXISTS brevo_analytics.emails (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   client_id UUID REFERENCES brevo_analytics.clients(id) ON DELETE CASCADE NOT NULL,
-  brevo_email_id BIGINT UNIQUE,  -- Brevo's message ID
+  brevo_email_id TEXT UNIQUE,  -- Brevo's message ID (format: <timestamp.id@domain>)
   recipient_email TEXT NOT NULL,
-  recipient_name TEXT,
-  template_name TEXT,
-  template_id BIGINT,
   subject TEXT,
   sent_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
