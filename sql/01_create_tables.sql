@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS brevo_analytics.email_events (
   created_at TIMESTAMPTZ DEFAULT NOW(),
 
   CONSTRAINT valid_event_type CHECK (
-    event_type IN ('sent', 'delivered', 'opened', 'clicked', 'bounced', 'unsubscribed', 'blocked', 'spam')
+    event_type IN ('sent', 'delivered', 'opened', 'clicked', 'bounced', 'unsubscribed', 'blocked', 'spam', 'deferred')
   )
 );
 
