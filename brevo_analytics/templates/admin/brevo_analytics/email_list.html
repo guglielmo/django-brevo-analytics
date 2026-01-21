@@ -1,6 +1,8 @@
 {% extends "admin/base_site.html" %}
 {% load static %}
 
+{% block title %}Email List{% endblock %}
+
 {% block extrahead %}
 {{ block.super }}
 <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
@@ -115,19 +117,19 @@
             </thead>
             <tbody>
                 {% for email in emails %}
-                <tr data-url="{% url 'admin:brevo_analytics_email_detail' email.message_id %}">
+                <tr data-url="{% url 'admin:brevo_analytics_email_detail' email.id %}">
                     <td>{{ email.recipient_email }}</td>
                     <td>{{ email.template_name|default:"—" }}</td>
                     <td>{{ email.subject|truncatewords:10 }}</td>
                     <td>{{ email.sent_at|date:"Y-m-d H:i" }}</td>
                     <td>
-                        {% if email.status == 'clicked' %}
+                        {% if email.current_status == 'clicked' %}
                             <span class="status-badge status-clicked">Clicked</span>
-                        {% elif email.status == 'opened' %}
+                        {% elif email.current_status == 'opened' %}
                             <span class="status-badge status-opened">Opened</span>
-                        {% elif email.status == 'delivered' %}
+                        {% elif email.current_status == 'delivered' %}
                             <span class="status-badge status-delivered">Delivered</span>
-                        {% elif email.status == 'bounced' %}
+                        {% elif email.current_status == 'bounced' %}
                             <span class="status-badge status-bounced">Bounced</span>
                         {% else %}
                             <span class="status-badge status-sent">Sent</span>

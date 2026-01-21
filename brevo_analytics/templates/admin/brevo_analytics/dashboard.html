@@ -1,6 +1,8 @@
 {% extends "admin/base_site.html" %}
 {% load static %}
 
+{% block title %}Brevo Analytics Dashboard{% endblock %}
+
 {% block extrahead %}
 {{ block.super }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -93,8 +95,6 @@
 {% endblock %}
 
 {% block content %}
-<h1>Brevo Analytics Dashboard</h1>
-
 {% if messages %}
 <ul class="messagelist">
   {% for message in messages %}
