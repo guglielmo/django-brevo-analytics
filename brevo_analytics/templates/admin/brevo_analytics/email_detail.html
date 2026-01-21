@@ -226,7 +226,13 @@
             </div>
             <div class="meta-item">
                 <span class="meta-label">Sent Date</span>
-                <span class="meta-value">{{ email.sent_at|date:"H:i d/m/Y" }}</span>
+                <span class="meta-value">
+                    {% if email.sent_at %}
+                        {{ email.sent_at|date:"H:i d/m/Y" }}
+                    {% else %}
+                        <em style="color: #999;">Not available (raw: {{ email.sent_at }})</em>
+                    {% endif %}
+                </span>
             </div>
             <div class="meta-item">
                 <span class="meta-label">Brevo Message ID</span>
