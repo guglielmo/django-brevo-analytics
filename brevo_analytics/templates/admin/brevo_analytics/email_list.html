@@ -1,5 +1,5 @@
 {% extends "admin/base_site.html" %}
-{% load static %}
+{% load static brevo_filters %}
 
 {% block title %}Email List{% endblock %}
 
@@ -54,24 +54,28 @@
         font-weight: bold;
     }
     .status-sent {
-        background-color: #d4edda;
-        color: #155724;
+        background-color: #f5f5f5;
+        color: #666;
     }
     .status-delivered {
-        background-color: #d1ecf1;
-        color: #0c5460;
+        background-color: #e8f5e9;
+        color: #2e7d32;
     }
     .status-opened {
-        background-color: #fff3cd;
-        color: #856404;
+        background-color: #e3f2fd;
+        color: #1565c0;
     }
     .status-clicked {
-        background-color: #cce5ff;
-        color: #004085;
+        background-color: #fff3e0;
+        color: #e65100;
     }
     .status-bounced {
-        background-color: #f8d7da;
-        color: #721c24;
+        background-color: #ffebee;
+        color: #c62828;
+    }
+    .status-unsubscribed {
+        background-color: #f5f5f5;
+        color: #666;
     }
     .no-data {
         text-align: center;
@@ -112,6 +116,7 @@
                     <th>Template</th>
                     <th>Subject</th>
                     <th>Sent Date</th>
+                    <th>Age</th>
                     <th>Status</th>
                 </tr>
             </thead>
@@ -122,6 +127,7 @@
                     <td>{{ email.template_name|default:"—" }}</td>
                     <td>{{ email.subject|truncatewords:10 }}</td>
                     <td>{{ email.sent_at|date:"Y-m-d H:i" }}</td>
+                    <td style="white-space: nowrap;">{{ email.sent_at|time_since_sent }}</td>
                     <td>
                         {% if email.current_status == 'clicked' %}
                             <span class="status-badge status-clicked">Clicked</span>
@@ -166,7 +172,7 @@
                 zeroRecords: "No matching emails found"
             },
             columnDefs: [
-                { orderable: true, targets: [0, 1, 2, 3, 4] }
+                { orderable: true, targets: [0, 1, 2, 3, 4, 5] }
             ]
         });
 
