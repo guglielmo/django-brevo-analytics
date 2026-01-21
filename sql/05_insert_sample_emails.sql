@@ -125,12 +125,12 @@ BEGIN
 
     -- Events for Email 3: Hard bounce
     INSERT INTO brevo_analytics.email_events (email_id, event_type, event_timestamp, bounce_type, bounce_reason) VALUES
-        (v_email_id_3, 'sent', NOW() - INTERVAL '1 day'),
+        (v_email_id_3, 'sent', NOW() - INTERVAL '1 day', NULL, NULL),
         (v_email_id_3, 'bounced', NOW() - INTERVAL '1 day' + INTERVAL '2 minutes', 'hard', 'Domain does not exist (SMTP 550)');
 
     -- Events for Email 4: Soft bounce
     INSERT INTO brevo_analytics.email_events (email_id, event_type, event_timestamp, bounce_type, bounce_reason) VALUES
-        (v_email_id_4, 'sent', NOW() - INTERVAL '3 days'),
+        (v_email_id_4, 'sent', NOW() - INTERVAL '3 days', NULL, NULL),
         (v_email_id_4, 'bounced', NOW() - INTERVAL '3 days' + INTERVAL '5 minutes', 'soft', 'Mailbox full (SMTP 452)');
 
     -- Events for Email 5: Just sent
