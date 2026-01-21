@@ -241,7 +241,7 @@ class SupabaseClient:
 
         Returns:
             List of email dicts with fields:
-            - id, recipient_email, template_name, subject, sent_at, current_status
+            - id, recipient_email, subject, sent_at, current_status
 
         Raises:
             ConfigurationError: If client is not properly configured
@@ -284,7 +284,7 @@ class SupabaseClient:
 
         # Query params
         params = {
-            'select': 'id,recipient_email,template_name,subject,sent_at,brevo_email_id',
+            'select': 'id,recipient_email,subject,sent_at,brevo_email_id',
             'sent_at': f'gte.{from_date.isoformat()}',
             'order': 'sent_at.desc',
             'limit': '1000'
