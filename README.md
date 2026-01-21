@@ -58,7 +58,26 @@ BREVO_ANALYTICS = {
 See [Supabase Setup Guide](docs/SUPABASE_SETUP.md) for:
 - Database schema (tables, RLS policies)
 - JWT generation with client_id claim
-- n8n integration for Brevo webhook data
+
+## Data Synchronization
+
+Brevo email and event data must be synced to Supabase before it appears in the dashboard. See [n8n Workflow Design](docs/n8n-workflow-design.md) for complete implementation guide covering:
+
+**Webhook Strategy (Recommended):**
+- Real-time event processing via Brevo webhooks
+- Lower API usage and minimal latency
+- Automatic event capture as they occur
+
+**Polling Strategy (Alternative):**
+- Periodic fetching from Brevo API
+- Historical data recovery support
+- Incremental sync with state tracking
+
+The workflow handles:
+- Email record creation from Brevo transactional emails
+- Event capture (sent, delivered, opened, clicked, bounced, etc.)
+- Field mapping and transformation
+- Duplicate prevention and upserts
 
 ## Configuration
 
