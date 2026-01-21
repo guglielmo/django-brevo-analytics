@@ -3,9 +3,11 @@
 Generate JWT token for Brevo Analytics with client_id claim.
 
 This script creates a JWT token that includes:
-- role: service_role (required by Supabase)
+- role: authenticated (standard Supabase role)
 - client_id: UUID of the client (for Row Level Security)
-- exp: 1 year expiry
+- exp: 10 years expiry
+
+The JWT must be signed with the Supabase JWT Secret (not service_role key).
 
 Usage:
     python 04_generate_jwt.py
@@ -18,44 +20,46 @@ import jwt
 from datetime import datetime, timedelta, timezone
 import sys
 
-def generate_jwt(supabase_secret: str, client_id: str, expiry_days: int = 365) -> str:
+def generate_jwt(jwt_secret: str, client_id: str, expiry_days: int = 3650) -> str:
     """Generate JWT token with client_id claim."""
 
     # Create payload
     payload = {
-        "role": "service_role",
+        "role": "authenticated",
         "client_id": client_id,
         "iat": datetime.now(timezone.utc),
         "exp": datetime.now(timezone.utc) + timedelta(days=expiry_days)
     }
 
     # Generate token
-    token = jwt.encode(payload, supabase_secret, algorithm="HS256")
+    token = jwt.encode(payload, jwt_secret, algorithm="HS256")
 
     return token
 
 def main():
     print("=" * 80)
-    print("🔑 Brevo Analytics JWT Generator")
+    print("🔑 Brevo Analytics JWT Generator (Modern Supabase API)")
     print("=" * 80)
     print()
 
-    # Get Supabase service_role secret
-    print("📋 Step 1: Get your Supabase service_role secret")
-    print("   1. Go to: https://supabase.com/dashboard/project/YOUR_PROJECT/settings/api")
-    print("   2. Copy the 'service_role' secret (NOT the 'anon' key)")
+    # Get Supabase JWT secret
+    print("📋 Step 1: Get your Supabase JWT Secret")
+    print("   1. Go to: https://supabase.com/dashboard/project/fvuhpocdeckmbdgiebfy/settings/api")
+    print("   2. Scroll to 'JWT Settings' section")
+    print("   3. Copy the 'JWT Secret' (long random string)")
+    print("   ⚠️  This is DIFFERENT from the service_role key!")
     print()
 
-    supabase_secret = input("Enter your Supabase service_role secret: ").strip()
+    jwt_secret = input("Enter your Supabase JWT Secret: ").strip()
 
-    if not supabase_secret:
-        print("❌ Error: Secret cannot be empty")
+    if not jwt_secret:
+        print("❌ Error: JWT Secret cannot be empty")
         sys.exit(1)
 
     print()
     print("📋 Step 2: Get your client_id (UUID)")
-    print("   Run 03_create_test_data.sql in Supabase SQL Editor")
-    print("   Copy the Client ID from the output")
+    print("   Run this SQL in Supabase SQL Editor:")
+    print("   SELECT id FROM brevo_analytics.clients WHERE slug = 'infoparlamento';")
     print()
 
     client_id = input("Enter your client_id (UUID): ").strip()
@@ -73,14 +77,14 @@ def main():
 
     print()
     print("📋 Step 3: Set expiry (optional)")
-    expiry_input = input("Token expiry in days (default: 365): ").strip()
-    expiry_days = int(expiry_input) if expiry_input else 365
+    expiry_input = input("Token expiry in days (default: 3650 = 10 years): ").strip()
+    expiry_days = int(expiry_input) if expiry_input else 3650
 
     print()
     print("🔧 Generating JWT token...")
 
     try:
-        token = generate_jwt(supabase_secret, client_id, expiry_days)
+        token = generate_jwt(jwt_secret, client_id, expiry_days)
 
         print()
         print("=" * 80)
@@ -94,24 +98,27 @@ def main():
         print()
         print("📝 Next Steps:")
         print()
-        print("1. Copy the token above")
+        print("1. Get your Supabase anon key from:")
+        print("   https://supabase.com/dashboard/project/fvuhpocdeckmbdgiebfy/settings/api")
+        print("   (Section: 'Project API keys' -> 'anon public')")
         print()
         print("2. Update your Django .env file:")
-        print(f"   BREVO_SUPABASE_URL=https://YOUR_PROJECT.supabase.co")
+        print(f"   BREVO_SUPABASE_URL=https://fvuhpocdeckmbdgiebfy.supabase.co")
+        print(f"   BREVO_SUPABASE_ANON_KEY=<your-anon-key>")
         print(f"   BREVO_JWT={token}")
         print()
         print("3. Restart your Django server")
         print()
         print("4. Test the connection with:")
-        print("   curl https://YOUR_PROJECT.supabase.co/rest/v1/emails?limit=1 \\")
-        print(f"     -H 'apikey: {supabase_secret}' \\")
+        print(f"   curl https://fvuhpocdeckmbdgiebfy.supabase.co/rest/v1/brevo_analytics.emails?limit=1 \\")
+        print(f"     -H 'apikey: <your-anon-key>' \\")
         print(f"     -H 'Authorization: Bearer {token}'")
         print()
         print("⚠️  Security Notes:")
-        print("   - Keep this token secure (never commit to git)")
-        print("   - Store only in server-side Django settings")
+        print("   - anon key is public (safe to commit)")
+        print("   - JWT token is private (never commit to git)")
         print(f"   - Token expires in {expiry_days} days")
-        print("   - Rotate tokens periodically")
+        print("   - RLS policies filter data by client_id automatically")
         print()
 
     except Exception as e:

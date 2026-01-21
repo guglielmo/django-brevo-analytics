@@ -2,11 +2,12 @@
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
+from urllib.parse import quote
 
+import requests
 from django.core.cache import cache
 from django.conf import settings
 from django.utils import timezone
-from postgrest import Client
 
 from .exceptions import ConfigurationError, SupabaseAPIError
 
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 class SupabaseClient:
     """
-    Wrapper around postgrest-py for Supabase API access.
+    Wrapper around Supabase PostgREST API.
 
     Handles JWT authentication, caching, and error handling.
     All queries automatically filtered by client_id via RLS.
@@ -25,22 +26,50 @@ class SupabaseClient:
         """Initialize Supabase client with configuration from Django settings"""
         config = getattr(settings, 'BREVO_ANALYTICS', {})
         self.url = config.get('SUPABASE_URL')
+        self.anon_key = config.get('ANON_KEY')
         self.jwt = config.get('JWT')
         self.cache_timeout = config.get('CACHE_TIMEOUT', 300)  # 5 minutes default
         self.retention_days = config.get('RETENTION_DAYS', 60)
-        self.client = None
 
-        if self.url and self.jwt:
-            self.client = Client(f"{self.url}/rest/v1")
-            self.client.headers = {
-                'apikey': self.jwt,
+        if self.url and self.anon_key and self.jwt:
+            self.base_url = f"{self.url}/rest/v1"
+            self.headers = {
+                'apikey': self.anon_key,
                 'Authorization': f'Bearer {self.jwt}',
                 'Content-Type': 'application/json',
+                'Prefer': 'return=representation'
             }
+        else:
+            self.base_url = None
+            self.headers = {}
 
     def is_configured(self) -> bool:
         """Check if client is properly configured"""
-        return bool(self.url and self.jwt)
+        return bool(self.url and self.anon_key and self.jwt)
+
+    def _get(self, table: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Make GET request to Supabase PostgREST API
+
+        Args:
+            table: Table name (e.g., 'brevo_analytics.emails')
+            params: Query parameters
+
+        Returns:
+            Response JSON data
+
+        Raises:
+            SupabaseAPIError: If request fails
+        """
+        url = f"{self.base_url}/{table}"
+
+        try:
+            response = requests.get(url, headers=self.headers, params=params, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Supabase API request failed: {e}")
+            raise SupabaseAPIError(f"API request failed: {str(e)}")
 
     def _get_date_filter(self, date_range: str) -> datetime:
         """
@@ -102,7 +131,8 @@ class SupabaseClient:
             logger.debug(f"Cached dashboard stats: {cache_key}")
             return stats
         except Exception as e:
-            raise SupabaseAPIError(f"Failed to fetch dashboard stats in get_dashboard_stats(): {str(e)}")
+            logger.error(f"Failed to fetch dashboard stats: {e}", exc_info=True)
+            raise SupabaseAPIError(f"Failed to fetch dashboard stats: {str(e)}")
 
     def _fetch_dashboard_stats(self, date_range: str) -> Dict[str, Any]:
         """
@@ -118,12 +148,12 @@ class SupabaseClient:
         logger.info(f"Fetching dashboard stats from {from_date}")
 
         # Query emails table for counts
-        emails_response = self.client.from_('brevo_analytics.emails') \
-            .select('id,sent_at') \
-            .gte('sent_at', from_date.isoformat()) \
-            .execute()
+        emails_data = self._get('brevo_analytics.emails', {
+            'select': 'id,sent_at',
+            'sent_at': f'gte.{from_date.isoformat()}'
+        })
 
-        total_sent = len(emails_response.data)
+        total_sent = len(emails_data)
 
         if total_sent == 0:
             return {
@@ -137,17 +167,19 @@ class SupabaseClient:
             }
 
         # Get all email IDs
-        email_ids = [e['id'] for e in emails_response.data]
+        email_ids = [e['id'] for e in emails_data]
 
         # Query events for these emails
-        events_response = self.client.from_('brevo_analytics.email_events') \
-            .select('email_id,event_type,event_timestamp') \
-            .in_('email_id', email_ids) \
-            .execute()
+        # PostgREST "in" filter: column=in.(value1,value2,...)
+        email_ids_str = ','.join(email_ids)
+        events_data = self._get('brevo_analytics.email_events', {
+            'select': 'email_id,event_type,event_timestamp',
+            'email_id': f'in.({email_ids_str})'
+        })
 
         # Build event lookup
         events_by_email = {}
-        for event in events_response.data:
+        for event in events_data:
             email_id = event['email_id']
             if email_id not in events_by_email:
                 events_by_email[email_id] = []
@@ -158,7 +190,7 @@ class SupabaseClient:
         bounced_count = 0
         delivery_times = []
 
-        for email in emails_response.data:
+        for email in emails_data:
             email_id = email['id']
             email_events = events_by_email.get(email_id, [])
 
@@ -231,7 +263,8 @@ class SupabaseClient:
             logger.debug(f"Cached emails list: {cache_key}")
             return emails
         except Exception as e:
-            raise SupabaseAPIError(f"Failed to fetch emails in get_emails(): {str(e)}")
+            logger.error(f"Failed to fetch emails: {e}", exc_info=True)
+            raise SupabaseAPIError(f"Failed to fetch emails: {str(e)}")
 
     def _fetch_emails(self, date_range: str, search: Optional[str]) -> List[Dict[str, Any]]:
         """
@@ -247,22 +280,15 @@ class SupabaseClient:
         from_date = self._get_date_filter(date_range)
         logger.info(f"Fetching emails from {from_date} (search={search})")
 
-        # Start with base query
-        query = self.client.from_('brevo_analytics.emails') \
-            .select('id,recipient_email,template_name,subject,sent_at,brevo_email_id') \
-            .gte('sent_at', from_date.isoformat()) \
-            .order('sent_at', desc=True) \
-            .limit(1000)  # Reasonable limit
+        # Query params
+        params = {
+            'select': 'id,recipient_email,template_name,subject,sent_at,brevo_email_id',
+            'sent_at': f'gte.{from_date.isoformat()}',
+            'order': 'sent_at.desc',
+            'limit': '1000'
+        }
 
-        # Add search filter if provided
-        if search:
-            # PostgREST uses ilike for case-insensitive pattern matching
-            # We'll do OR search across recipient and subject
-            # Note: postgrest-py doesn't have great OR support, so we'll do client-side filtering
-            pass
-
-        response = query.execute()
-        emails = response.data
+        emails = self._get('brevo_analytics.emails', params)
 
         # Apply search filter client-side if needed
         if search:
@@ -276,15 +302,17 @@ class SupabaseClient:
         # Get latest event for each email to determine current status
         if emails:
             email_ids = [e['id'] for e in emails]
-            events_response = self.client.from_('brevo_analytics.email_events') \
-                .select('email_id,event_type,event_timestamp') \
-                .in_('email_id', email_ids) \
-                .order('event_timestamp', desc=False) \
-                .execute()
+            email_ids_str = ','.join(email_ids)
+
+            events_data = self._get('brevo_analytics.email_events', {
+                'select': 'email_id,event_type,event_timestamp',
+                'email_id': f'in.({email_ids_str})',
+                'order': 'event_timestamp.asc'
+            })
 
             # Group events by email and determine current status
             events_by_email = {}
-            for event in events_response.data:
+            for event in events_data:
                 email_id = event['email_id']
                 if email_id not in events_by_email:
                     events_by_email[email_id] = []
@@ -347,7 +375,8 @@ class SupabaseClient:
             logger.debug(f"Cached email detail: {cache_key}")
             return detail
         except Exception as e:
-            raise SupabaseAPIError(f"Failed to fetch email detail in get_email_detail(): {str(e)}")
+            logger.error(f"Failed to fetch email detail: {e}", exc_info=True)
+            raise SupabaseAPIError(f"Failed to fetch email detail: {str(e)}")
 
     def _fetch_email_detail(self, email_id: str) -> Dict[str, Any]:
         """
@@ -362,23 +391,23 @@ class SupabaseClient:
         logger.info(f"Fetching email detail for {email_id}")
 
         # Fetch email record
-        email_response = self.client.from_('brevo_analytics.emails') \
-            .select('*') \
-            .eq('id', email_id) \
-            .single() \
-            .execute()
+        email_data = self._get('brevo_analytics.emails', {
+            'select': '*',
+            'id': f'eq.{email_id}',
+            'limit': '1'
+        })
 
-        if not email_response.data:
+        if not email_data:
             raise SupabaseAPIError(f"Email {email_id} not found")
 
         # Fetch all events for this email
-        events_response = self.client.from_('brevo_analytics.email_events') \
-            .select('*') \
-            .eq('email_id', email_id) \
-            .order('event_timestamp', desc=False) \
-            .execute()
+        events_data = self._get('brevo_analytics.email_events', {
+            'select': '*',
+            'email_id': f'eq.{email_id}',
+            'order': 'event_timestamp.asc'
+        })
 
         return {
-            'email': email_response.data,
-            'events': events_response.data
+            'email': email_data[0],
+            'events': events_data
         }
