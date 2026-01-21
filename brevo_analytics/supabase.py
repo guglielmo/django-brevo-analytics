@@ -402,6 +402,11 @@ class SupabaseClient:
         if not email_data:
             raise SupabaseAPIError(f"Email {email_id} not found")
 
+        # Debug: log what we got from database
+        logger.info(f"Email data from DB: {email_data[0] if email_data else 'None'}")
+        if email_data:
+            logger.info(f"sent_at field: {email_data[0].get('sent_at', 'MISSING')}")
+
         # Fetch all events for this email
         events_data = self._get('email_events', {
             'select': '*',
