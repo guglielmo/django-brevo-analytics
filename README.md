@@ -1,25 +1,49 @@
 # Django Brevo Analytics
 
-A reusable Django package that integrates transactional email analytics from Brevo (via Supabase) into Django admin.
-
-![Dashboard Preview](docs/images/dashboard.png)
+A reusable Django package that integrates transactional email analytics from Brevo directly into Django admin with an interactive Vue.js interface.
 
 ## Features
 
-- **Dashboard**: Delivery health metrics with sparklines (total sent, delivery rate, bounce rate, avg delivery time)
-- **Email List**: Searchable, sortable table with date filtering
-- **Email Detail**: Full event timeline with bounce reason analysis
-- **Read-Only**: Secure, read-only access to external Supabase data
-- **Cache-Resilient**: Graceful fallback to cached data when API is unavailable
-- **RLS Security**: Client isolation via Supabase Row Level Security
-- **Admin Integration**: Native Django admin navigation and permissions
+### Analytics Dashboard
+- **KPI Metrics**: Total emails sent, delivery rate, open rate, click rate
+- **Real-time Stats**: Bounced and blocked emails count
+- **Recent Messages**: Last 20 sent messages with quick access
+- **Interactive Vue.js SPA**: Fast, responsive interface with modal-based navigation
+
+### Email Tracking
+- **Message-level View**: All emails grouped by message with aggregate statistics
+- **Email Detail Modal**: Complete event timeline for each recipient
+- **Status Filtering**: Filter by delivered, opened, clicked, bounced, blocked
+- **Event Timeline**: Chronological view of all email events with metadata
+
+### Blacklist Management
+- **Check Individual Emails**: Verify if an email is in Brevo's blacklist
+- **Manage Blacklist**: View and manage all blacklisted emails
+- **Brevo API Integration**: Real-time synchronization with Brevo
+- **Remove from Blacklist**: Unblock emails directly from the UI
+
+### Internationalization
+- **Multi-language Support**: English and Italian translations
+- **Localized UI**: All interface elements respect Django's `LANGUAGE_CODE`
+- **Date Formatting**: Locale-aware date and time display
+
+### Real-time Webhook Integration
+- **Instant Updates**: Process Brevo events as they occur
+- **HMAC Validation**: Secure webhook signature verification
+- **Auto-enrichment**: Bounce reasons automatically fetched from Brevo API
+
+### Historical Data Import
+- **CSV Import**: Import historical email data from raw Brevo logs
+- **DuckDB Processing**: Efficient bulk data processing
+- **Bounce Enrichment**: Automatic bounce reason lookup during import
+- **Statistics Verification**: Validate data against Brevo API
 
 ## Requirements
 
 - Python 3.8+
 - Django 4.2+
-- Supabase project with required schema
-- JWT token with `client_id` claim
+- Django REST Framework 3.14+
+- PostgreSQL (for JSONField support)
 
 ## Installation
 
@@ -27,178 +51,198 @@ A reusable Django package that integrates transactional email analytics from Bre
 pip install django-brevo-analytics
 ```
 
-See [Installation Guide](docs/INSTALLATION.md) for detailed setup instructions.
-
 ## Quick Start
 
-1. Add to `INSTALLED_APPS`:
+### 1. Add to INSTALLED_APPS
 
 ```python
 INSTALLED_APPS = [
     # ...
+    'rest_framework',
+    'corsheaders',
     'brevo_analytics',
+]
+
+MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',  # Add at top
+    # ... other middleware
 ]
 ```
 
-2. Configure Supabase connection:
+### 2. Configure Settings
 
 ```python
+# Django REST Framework
+REST_FRAMEWORK = {
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAdminUser',
+    ],
+}
+
+# CORS (adjust for production)
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:8000",
+]
+
+# Brevo Analytics Configuration
 BREVO_ANALYTICS = {
-    'SUPABASE_URL': 'https://your-project.supabase.co',
-    'JWT': 'your-jwt-token',  # Must include client_id claim
-    'CACHE_TIMEOUT': 300,     # Optional, defaults to 5 minutes
-    'RETENTION_DAYS': 60,      # Optional, defaults to 60 days
+    'WEBHOOK_SECRET': 'your-webhook-secret',  # From Brevo dashboard
+    'API_KEY': 'your-brevo-api-key',          # Optional, for bounce enrichment
+    'ALLOWED_SENDERS': [                       # Filter emails by sender
+        'info@yourproject.com',
+    ],
 }
 ```
 
-3. Access analytics at `/admin/brevo-analytics/` (requires staff permissions)
+### 3. Run Migrations
 
-## Supabase Setup
+```bash
+python manage.py migrate brevo_analytics
+```
 
-See [Supabase Setup Guide](docs/SUPABASE_SETUP.md) for:
-- Database schema (tables, RLS policies)
-- JWT generation with client_id claim
-
-## Data Synchronization
-
-Brevo email and event data must be synced to Supabase before it appears in the dashboard. See [n8n Workflow Design](docs/n8n-workflow-design.md) for complete implementation guide covering:
-
-**Webhook Strategy (Recommended):**
-- Real-time event processing via Brevo webhooks
-- Lower API usage and minimal latency
-- Automatic event capture as they occur
-
-**Polling Strategy (Alternative):**
-- Periodic fetching from Brevo API
-- Historical data recovery support
-- Incremental sync with state tracking
-
-The workflow handles:
-- Email record creation from Brevo transactional emails
-- Event capture (sent, delivered, opened, clicked, bounced, etc.)
-- Field mapping and transformation
-- Duplicate prevention and upserts
-
-## Configuration
-
-### Required Settings
-
-- `SUPABASE_URL`: Your Supabase project URL
-- `JWT`: JWT token with `client_id` claim for RLS
-
-### Optional Settings
-
-- `CACHE_TIMEOUT`: Cache duration in seconds (default: 300)
-- `RETENTION_DAYS`: Data retention period (default: 60)
-
-### Django Cache
-
-This package uses Django's cache framework. Configure a cache backend in settings:
+### 4. Include URLs
 
 ```python
-CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-        'LOCATION': 'redis://127.0.0.1:6379/1',
-    }
-}
+# your_project/urls.py
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('admin/brevo_analytics/', include('brevo_analytics.urls')),
+]
 ```
 
-See [Django cache documentation](https://docs.djangoproject.com/en/4.2/topics/cache/) for other backends.
+### 5. Set Up Brevo Webhook
 
-## Usage
+Configure webhook in Brevo dashboard:
+- URL: `https://yourdomain.com/admin/brevo_analytics/webhook/`
+- Events: All transactional email events
+- Add webhook secret to settings
 
-### Dashboard
+### 6. Access Dashboard
 
-Access `/admin/brevo-analytics/` to view:
-- Total emails sent
-- Delivery rate percentage
-- Bounce rate percentage
-- Average delivery time
-- Sparkline trends for each metric
+Navigate to `/admin/brevo_analytics/brevomessage/` (requires staff permissions)
 
-Filter by date range: Last 24 hours, 7 days, 30 days, or 90 days.
+## Management Commands
 
-### Email List
+### Import Historical Data
 
-Click "View All Emails" or navigate to `/admin/brevo-analytics/emails/` to:
-- Search by recipient email or subject
-- Sort by any column
-- Filter by date range
-- View current status (sent/delivered/opened/clicked/bounced)
+```bash
+python manage.py import_brevo_logs /path/to/brevo_logs.csv
+```
 
-### Email Detail
+Options:
+- `--dry-run`: Preview import without saving
+- `--clear`: Clear existing data before import
 
-Click any email row to view:
-- Full email metadata
-- Chronological event timeline
-- Bounce details (type and reason) for troubleshooting
+### Verify Statistics
+
+```bash
+python manage.py verify_brevo_stats
+```
+
+Compares local statistics with Brevo API to ensure data accuracy.
 
 ## Architecture
 
-### Virtual Model Pattern
+### Django-Native Design
+- **Models**: Data stored directly in PostgreSQL via Django ORM
+- **JSONField Events**: Email events stored as JSON array for optimal performance
+- **Denormalized Stats**: Pre-calculated statistics for fast queries
+- **Cached Status**: Current status field for efficient filtering
 
-This package uses a "virtual model" approach:
-- Django model with `managed=False` (no database table)
-- Registers with Django admin for navigation
-- All data fetched from Supabase via postgrest-py
+### REST API
+- **Django REST Framework**: 6 API endpoints for dashboard and analytics
+- **Admin-Only Access**: All endpoints require Django admin permissions
+- **Serialized Data**: Optimized JSON responses for Vue.js frontend
+
+### Vue.js SPA
+- **Composition API**: Modern Vue 3 with reactivity
+- **Hash-based Routing**: Client-side routing without server config
+- **Modal Overlays**: Email details shown in modals, no page reloads
+- **Responsive Design**: Mobile-friendly interface
 
 ### Security
+- **HMAC Webhook Validation**: Verify webhook signatures from Brevo
+- **Admin Permissions**: All views require Django staff access
+- **CORS Protection**: Configurable CORS for API endpoints
+- **SQL Injection Safe**: Django ORM prevents SQL injection
 
-- **JWT Authentication**: All API calls use JWT with `client_id` claim
-- **Row Level Security**: Supabase RLS policies enforce client isolation
-- **Read-Only**: No write operations, safe for production use
-- **Staff Permissions**: Django admin permissions required
+## Configuration Options
 
-### Caching Strategy
+### Required
 
-- All Supabase queries cached via Django cache framework
-- Cache keys include all filter parameters
-- Failed API calls fall back to cached data with warning
-- Configurable cache timeout (default: 5 minutes)
+- `WEBHOOK_SECRET`: Secret key from Brevo webhook configuration
+
+### Optional
+
+- `API_KEY`: Brevo API key for bounce enrichment and blacklist management
+- `ALLOWED_SENDERS`: List of sender emails to filter (for multi-client accounts)
+- `CLIENT_UID`: UUID for tracking client (defaults to generated UUID)
+
+## Data Flow
+
+```
+Brevo → Webhook → Django Model → PostgreSQL
+                       ↓
+                   DRF API
+                       ↓
+                  Vue.js SPA
+```
+
+## Multi-Client Support
+
+For shared Brevo accounts, use `ALLOWED_SENDERS` to filter:
+- Emails with matching sender: always included
+- Emails without sender info: included only if in local database
+- This prevents showing other clients' data
 
 ## Development
 
-### Setup
+### Clone Repository
 
 ```bash
-git clone https://github.com/yourusername/django-brevo-analytics.git
+git clone https://github.com/guglielmo/django-brevo-analytics.git
 cd django-brevo-analytics
+```
+
+### Install Dependencies
+
+```bash
 pip install -r requirements.txt
 ```
 
-### Running Tests
+### Run Tests
 
 ```bash
-pytest
+python manage.py test brevo_analytics
 ```
 
-### Building Package
+### Build Package
 
 ```bash
-python setup.py sdist bdist_wheel
+python -m build
 ```
 
 ## Troubleshooting
 
-### "Configuration Error" message
+### Webhook Not Working
 
-- Verify `BREVO_ANALYTICS` settings in Django settings
-- Check that `SUPABASE_URL` is valid
-- Verify JWT is not expired
+- Verify `WEBHOOK_SECRET` matches Brevo configuration
+- Check webhook URL is publicly accessible
+- Review Django logs for HMAC validation errors
+- Test webhook with `curl` to check connectivity
 
-### "Unable to load analytics data"
+### Empty Dashboard
 
-- Check Supabase project is accessible
-- Verify JWT has read permissions on tables
-- Check RLS policies allow access
-- Review Django cache configuration
+- Run `import_brevo_logs` to import historical data
+- Verify webhook is configured and receiving events
+- Check `ALLOWED_SENDERS` filter isn't too restrictive
+- Ensure migrations have been applied
 
-### Empty dashboard
+### Blacklist Management Not Working
 
-- Verify data exists in Supabase tables
-- Check JWT `client_id` claim matches data
-- Review date range filter (may be too restrictive)
+- Add `API_KEY` to `BREVO_ANALYTICS` settings
+- Verify API key has correct permissions on Brevo
+- Check network connectivity to Brevo API
 
 ## Contributing
 
@@ -208,19 +252,21 @@ Contributions welcome! Please:
 3. Add tests for new functionality
 4. Submit a pull request
 
+See [AUTHORS.md](AUTHORS.md) for contributors.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
 
 ## Credits
 
-- Built with [Django](https://www.djangoproject.com/)
-- Uses [postgrest-py](https://github.com/supabase-community/postgrest-py) for Supabase API
-- Charts powered by [Chart.js](https://www.chartjs.org/)
-- Tables powered by [DataTables](https://datatables.net/)
+- Built with [Django](https://www.djangoproject.com/) and [Django REST Framework](https://www.django-rest-framework.org/)
+- Frontend powered by [Vue.js 3](https://vuejs.org/)
+- CSV processing with [DuckDB](https://duckdb.org/)
 
-## Support
+## Links
 
-- [Documentation](docs/)
-- [Issue Tracker](https://github.com/yourusername/django-brevo-analytics/issues)
+- [PyPI Package](https://pypi.org/project/django-brevo-analytics/)
+- [GitHub Repository](https://github.com/guglielmo/django-brevo-analytics)
+- [Issue Tracker](https://github.com/guglielmo/django-brevo-analytics/issues)
 - [Changelog](CHANGELOG.md)
