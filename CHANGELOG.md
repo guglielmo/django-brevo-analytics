@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-01-22
+
+### Changed
+- Updated README.md to remove all Supabase references
+- Updated documentation to reflect Django-native architecture
+- Added comprehensive setup instructions for DRF and CORS
+- Added management commands documentation
+- Updated troubleshooting section for current architecture
+
+### Fixed
+- Multi-client blacklist filtering: now correctly filters by ALLOWED_SENDERS and local database
+- Emails with empty senderEmail (hard bounces) now properly included when in local DB
+- Prevents showing blacklisted emails from other clients on shared Brevo accounts
+
 ## [0.1.0] - 2026-01-22
 
 ### Added
