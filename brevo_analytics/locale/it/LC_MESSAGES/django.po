@@ -1,0 +1,28 @@
+# Translation file for Brevo Analytics
+# Copyright (C) 2026
+# This file is distributed under the same license as the brevo-analytics package.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: 1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-01-22 00:00+0000\n"
+"PO-Revision-Date: 2026-01-22 00:00+0000\n"
+"Last-Translator: \n"
+"Language-Team: Italian\n"
+"Language: it\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+# Model verbose names
+msgid "Message Analysis"
+msgstr "Analisi Invii"
+
+msgid "Blacklist Management"
+msgstr "Indirizzi Bloccati"
+
+# App name
+msgid "Brevo Analytics"
+msgstr "Analisi Email"
