@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [
-    {name = "Your Name", email = "your.email@example.com"}
+    {name = "Guglielmo Celata", email = "guglielmo.celata@gmail.com"}
 ]
 classifiers = [
     "Environment :: Web Environment",
@@ -29,15 +29,18 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
 ]
 dependencies = [
-    "Django>=4.2",
-    "postgrest-py>=0.10.0",
+    "Django>=4.2,<5.0",
+    "djangorestframework>=3.14.0",
+    "django-cors-headers>=4.3.0",
+    "requests>=2.31.0",
+    "duckdb>=0.10.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/django-brevo-analytics"
-Documentation = "https://github.com/yourusername/django-brevo-analytics/blob/main/README.md"
-Repository = "https://github.com/yourusername/django-brevo-analytics"
-Changelog = "https://github.com/yourusername/django-brevo-analytics/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/guglielmo/django-brevo-analytics"
+Documentation = "https://github.com/guglielmo/django-brevo-analytics/blob/main/README.md"
+Repository = "https://github.com/guglielmo/django-brevo-analytics"
+Changelog = "https://github.com/guglielmo/django-brevo-analytics/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 include = ["brevo_analytics*"]

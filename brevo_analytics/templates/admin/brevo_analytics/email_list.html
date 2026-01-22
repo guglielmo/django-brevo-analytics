@@ -5,7 +5,6 @@
 
 {% block extrahead %}
 {{ block.super }}
-<link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
 <style>
     .email-list-container {
         padding: 20px;
@@ -40,11 +39,43 @@
     .search-form button:hover {
         background-color: #2e5266;
     }
-    table.dataTable tbody tr {
-        cursor: pointer;
+    .search-form select {
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+        background: white;
     }
-    table.dataTable tbody tr:hover {
+    #email-table-container {
+        background: white;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+        border-radius: 4px;
+        margin-top: 20px;
+    }
+    .email-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    .email-table thead {
         background-color: #f5f5f5;
+        box-shadow: 0 2px 2px rgba(0,0,0,0.05);
+    }
+    .email-table th,
+    .email-table td {
+        padding: 12px;
+        text-align: left;
+        border-bottom: 1px solid #ddd;
+    }
+    .email-table th {
+        font-weight: 600;
+        user-select: none;
+    }
+    .email-table tbody tr {
+        cursor: pointer;
+        transition: background-color 0.15s;
+    }
+    .email-table tbody tr:hover {
+        background-color: #f9f9f9;
     }
     .status-badge {
         display: inline-block;
@@ -77,6 +108,14 @@
         background-color: #f5f5f5;
         color: #666;
     }
+    .status-blocked {
+        background-color: #fce4ec;
+        color: #880e4f;
+    }
+    .status-deferred {
+        background-color: #fff9c4;
+        color: #f57f17;
+    }
     .no-data {
         text-align: center;
         padding: 40px;
@@ -96,91 +135,126 @@
 {% block content %}
 <div class="email-list-container">
     <div class="list-header">
-        <h1>Email List</h1>
+        <h1>Email List ({{ total }} emails)</h1>
         <form method="get" class="search-form">
-            <input type="text" name="q" placeholder="Search by recipient or subject" value="{{ request.GET.q }}">
-            <input type="date" name="date_from" placeholder="From date" value="{{ request.GET.date_from }}">
-            <input type="date" name="date_to" placeholder="To date" value="{{ request.GET.date_to }}">
+            <select name="range" onchange="this.form.submit()">
+                <option value="24h" {% if date_range == '24h' %}selected{% endif %}>Last 24 hours</option>
+                <option value="7d" {% if date_range == '7d' %}selected{% endif %}>Last 7 days</option>
+                <option value="30d" {% if date_range == '30d' %}selected{% endif %}>Last 30 days</option>
+            </select>
+            <select name="status" onchange="this.form.submit()">
+                <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All statuses</option>
+                <option value="sent" {% if status_filter == 'sent' %}selected{% endif %}>Sent</option>
+                <option value="delivered" {% if status_filter == 'delivered' %}selected{% endif %}>Delivered</option>
+                <option value="opened" {% if status_filter == 'opened' %}selected{% endif %}>Opened</option>
+                <option value="clicked" {% if status_filter == 'clicked' %}selected{% endif %}>Clicked</option>
+                <option value="bounced" {% if status_filter == 'bounced' %}selected{% endif %}>Bounced</option>
+                <option value="blocked" {% if status_filter == 'blocked' %}selected{% endif %}>Blocked</option>
+                <option value="deferred" {% if status_filter == 'deferred' %}selected{% endif %}>Deferred</option>
+                <option value="unsubscribed" {% if status_filter == 'unsubscribed' %}selected{% endif %}>Unsubscribed</option>
+            </select>
+            <input type="text" name="q" placeholder="Search by recipient or subject" value="{{ search }}">
             <button type="submit">Filter</button>
-            {% if request.GET.q or request.GET.date_from or request.GET.date_to %}
+            {% if search or status_filter != 'all' or date_range != '7d' %}
                 <a href="{% url 'admin:brevo_analytics_email_list' %}" style="padding: 8px 16px; text-decoration: none; color: #666;">Clear</a>
             {% endif %}
         </form>
     </div>
 
     {% if emails %}
-        <table id="emailTable" class="display" style="width:100%">
-            <thead>
-                <tr>
-                    <th>Recipient</th>
-                    <th>Subject</th>
-                    <th>Sent Date</th>
-                    <th>Age</th>
-                    <th>Status</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for email in emails %}
-                <tr data-url="{% url 'admin:brevo_analytics_email_detail' email.id %}">
-                    <td>{{ email.recipient_email }}</td>
-                    <td>{{ email.subject|truncatewords:10 }}</td>
-                    <td>{{ email.sent_at|date:"Y-m-d H:i" }}</td>
-                    <td style="white-space: nowrap;">{{ email.sent_at|time_since_sent }}</td>
-                    <td>
-                        {% if email.current_status == 'clicked' %}
-                            <span class="status-badge status-clicked">Clicked</span>
-                        {% elif email.current_status == 'opened' %}
-                            <span class="status-badge status-opened">Opened</span>
-                        {% elif email.current_status == 'delivered' %}
-                            <span class="status-badge status-delivered">Delivered</span>
-                        {% elif email.current_status == 'bounced' %}
-                            <span class="status-badge status-bounced">Bounced</span>
-                        {% else %}
-                            <span class="status-badge status-sent">Sent</span>
-                        {% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        <div id="email-table-container" style="max-height: 70vh; overflow-y: auto;">
+            <table class="email-table" id="emailTable">
+                <thead style="position: sticky; top: 0; background: white; z-index: 10;">
+                    <tr>
+                        <th style="cursor: pointer;" onclick="sortTable(0)">Recipient ↕</th>
+                        <th style="cursor: pointer;" onclick="sortTable(1)">Subject ↕</th>
+                        <th style="cursor: pointer;" onclick="sortTable(2)">Sent Date ↕</th>
+                        <th style="cursor: pointer;" onclick="sortTable(3)">Status ↕</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for email in emails %}
+                    <tr onclick="window.location.href='{% url 'admin:brevo_analytics_email_detail' email.id %}'">
+                        <td>{{ email.recipient_email }}</td>
+                        <td>{{ email.subject|truncatewords:10 }}</td>
+                        <td data-timestamp="{{ email.sent_at.timestamp }}">{{ email.sent_at|date:"Y-m-d H:i" }}</td>
+                        <td>
+                            {% if email.current_status == 'clicked' %}
+                                <span class="status-badge status-clicked">Clicked</span>
+                            {% elif email.current_status == 'opened' %}
+                                <span class="status-badge status-opened">Opened</span>
+                            {% elif email.current_status == 'delivered' %}
+                                <span class="status-badge status-delivered">Delivered</span>
+                            {% elif email.current_status == 'bounced' %}
+                                <span class="status-badge status-bounced">Bounced</span>
+                            {% elif email.current_status == 'blocked' %}
+                                <span class="status-badge status-blocked">Blocked</span>
+                            {% elif email.current_status == 'deferred' %}
+                                <span class="status-badge status-deferred">Deferred</span>
+                            {% elif email.current_status == 'unsubscribed' %}
+                                <span class="status-badge status-unsubscribed">Unsubscribed</span>
+                            {% else %}
+                                <span class="status-badge status-sent">Sent</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     {% else %}
         <div class="no-data">
             <p>No emails found.</p>
-            {% if request.GET.q or request.GET.date_from or request.GET.date_to %}
+            {% if search or status_filter != 'all' %}
                 <p>Try adjusting your search filters.</p>
             {% endif %}
         </div>
     {% endif %}
 </div>
 
-<script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
-<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
 <script>
-    $(document).ready(function() {
-        var table = $('#emailTable').DataTable({
-            order: [[3, 'desc']], // Sort by sent date descending
-            pageLength: 25,
-            lengthMenu: [[25, 50, 100], [25, 50, 100]],
-            language: {
-                search: "Search table:",
-                lengthMenu: "Show _MENU_ entries",
-                info: "Showing _START_ to _END_ of _TOTAL_ emails",
-                infoEmpty: "No emails to display",
-                infoFiltered: "(filtered from _MAX_ total emails)",
-                zeroRecords: "No matching emails found"
-            },
-            columnDefs: [
-                { orderable: true, targets: [0, 1, 2, 3, 4, 5] }
-            ]
-        });
+// Simple table sorting
+let sortDirection = {};
 
-        // Make rows clickable
-        $('#emailTable tbody').on('click', 'tr', function() {
-            var url = $(this).data('url');
-            if (url) {
-                window.location.href = url;
-            }
-        });
+function sortTable(columnIndex) {
+    const table = document.getElementById("emailTable");
+    const tbody = table.querySelector("tbody");
+    const rows = Array.from(tbody.querySelectorAll("tr"));
+
+    // Toggle sort direction
+    if (!sortDirection[columnIndex]) {
+        sortDirection[columnIndex] = 'asc';
+    } else {
+        sortDirection[columnIndex] = sortDirection[columnIndex] === 'asc' ? 'desc' : 'asc';
+    }
+
+    const direction = sortDirection[columnIndex];
+
+    rows.sort((a, b) => {
+        let aValue, bValue;
+
+        // Special handling for date column (index 2)
+        if (columnIndex === 2) {
+            aValue = parseFloat(a.cells[columnIndex].dataset.timestamp);
+            bValue = parseFloat(b.cells[columnIndex].dataset.timestamp);
+        } else {
+            aValue = a.cells[columnIndex].innerText.toLowerCase();
+            bValue = b.cells[columnIndex].innerText.toLowerCase();
+        }
+
+        if (aValue < bValue) return direction === 'asc' ? -1 : 1;
+        if (aValue > bValue) return direction === 'asc' ? 1 : -1;
+        return 0;
     });
+
+    // Re-append rows in sorted order
+    rows.forEach(row => tbody.appendChild(row));
+}
+
+// Sort by sent date descending by default on page load
+window.addEventListener('DOMContentLoaded', function() {
+    sortDirection[2] = 'asc';  // Set to asc so it toggles to desc
+    sortTable(2);  // Sort by Sent Date
+});
 </script>
 {% endblock %}

@@ -1,4 +1,8 @@
 include README.md
 include LICENSE
+include CHANGELOG.md
+include AUTHORS.md
 recursive-include brevo_analytics/templates *
 recursive-include brevo_analytics/static *
+recursive-include brevo_analytics/locale *
+recursive-include brevo_analytics/migrations *.py

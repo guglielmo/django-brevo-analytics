@@ -1,0 +1,38 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block extrastyle %}
+<link rel="stylesheet" href="{% static 'brevo_analytics/css/app.css' %}">
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  {% for item in breadcrumb %}
+    {% if item.url %}
+      <a href="{{ item.url }}">{{ item.title }}</a> ›
+    {% else %}
+      {{ item.title }}
+    {% endif %}
+  {% endfor %}
+</div>
+{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+
+<!-- Pass translations and config to JavaScript -->
+<script>
+  window.BREVO_ANALYTICS_CONFIG = {
+    translations: {{ translations_json }},
+    languageCode: '{{ language_code }}'
+  };
+</script>
+
+<div id="blacklist-app">
+  <router-view></router-view>
+</div>
+
+<script src="https://unpkg.com/vue@3.4.15/dist/vue.global.prod.js"></script>
+<script src="https://unpkg.com/vue-router@4.2.5/dist/vue-router.global.prod.js"></script>
+<script src="{% static 'brevo_analytics/js/blacklist-app.js' %}" type="module"></script>
+{% endblock %}
