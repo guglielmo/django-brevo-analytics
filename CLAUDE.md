@@ -365,3 +365,165 @@ Mapped from Brevo webhook events:
 - `opened` → `opened`
 - `click` → `clicked`
 - `deferred` → `deferred`
+
+## Release and Deployment
+
+### Package Information
+- **PyPI Package**: https://pypi.org/project/django-brevo-analytics/
+- **GitHub Repository**: https://github.com/guglielmo/django-brevo-analytics
+- **Automated Deployment**: GitHub Actions publishes to PyPI on release
+
+### Release Process
+
+#### 1. Update Version
+
+Edit `brevo_analytics/__init__.py`:
+```python
+__version__ = '0.2.0'  # Update to new version
+```
+
+#### 2. Update CHANGELOG.md
+
+Add release notes in [Keep a Changelog](https://keepachangelog.com/) format:
+```markdown
+## [0.2.0] - 2026-01-XX
+
+### Added
+- New feature description
+
+### Changed
+- Change description
+
+### Fixed
+- Fix description
+```
+
+#### 3. Commit and Tag
+
+```bash
+cd /home/gu/Workspace/lab.prototypes/brevo-analytics
+
+# Commit version bump
+git add brevo_analytics/__init__.py CHANGELOG.md
+git commit -m "Release v0.2.0"
+
+# Create and push tag
+git tag v0.2.0
+git push origin main v0.2.0
+```
+
+#### 4. Create GitHub Release
+
+```bash
+# Create release with GitHub CLI
+gh release create v0.2.0 \
+  --title "v0.2.0" \
+  --notes "Brief description or link to CHANGELOG"
+```
+
+**GitHub Actions will automatically:**
+1. Build the package (`python -m build`)
+2. Validate package with twine
+3. Publish to PyPI using `PYPI_API_TOKEN` secret
+
+#### 5. Monitor Deployment
+
+```bash
+# Check GitHub Actions workflow
+gh run list --limit 3
+
+# View specific run details
+gh run view <run-id>
+```
+
+### Manual Release (Alternative)
+
+If GitHub Actions fails or you need to publish manually:
+
+```bash
+cd /home/gu/Workspace/lab.prototypes/brevo-analytics
+
+# Clean previous builds
+rm -rf dist/ build/ *.egg-info
+
+# Install build tools
+pip install build twine
+
+# Build package
+python -m build
+
+# Check package
+twine check dist/*
+
+# Upload to PyPI
+export TWINE_USERNAME=__token__
+export TWINE_PASSWORD=<your-pypi-token>  # Token from ~/.pypirc or pypi.org
+twine upload dist/*
+```
+
+### Version Numbering
+
+Follow [Semantic Versioning](https://semver.org/):
+- **MAJOR** (1.0.0): Breaking changes, incompatible API
+- **MINOR** (0.2.0): New features, backwards-compatible
+- **PATCH** (0.1.1): Bug fixes, backwards-compatible
+
+### GitHub Actions Configuration
+
+The release workflow is defined in `.github/workflows/publish.yml`:
+- Triggers on: GitHub release published
+- Requires secret: `PYPI_API_TOKEN` (PyPI API token)
+- Builds wheel and source distribution
+- Validates with twine
+- Publishes to PyPI
+
+### PyPI Token Management
+
+The PyPI token is stored as a GitHub secret:
+- Name: `PYPI_API_TOKEN`
+- Value: API token from https://pypi.org/manage/account/token/
+- Scope: Entire account (for first upload) or project-specific
+
+To update the token:
+```bash
+# Interactive (will prompt for token)
+gh secret set PYPI_API_TOKEN
+
+# Or from stdin
+echo "pypi-YOUR-TOKEN-HERE" | gh secret set PYPI_API_TOKEN
+```
+
+**Note**: Never commit PyPI tokens to git. Keep them in:
+- GitHub Secrets (for CI/CD)
+- `~/.pypirc` (for local manual uploads)
+- Password manager (for backup)
+
+### Testing Package Installation
+
+After publishing to PyPI:
+```bash
+# Create test environment
+python -m venv test_env
+source test_env/bin/activate
+
+# Install from PyPI
+pip install django-brevo-analytics==0.2.0
+
+# Verify installation
+python -c "import brevo_analytics; print(brevo_analytics.__version__)"
+```
+
+### Troubleshooting Releases
+
+**GitHub Actions fails with 403 Forbidden:**
+- Verify `PYPI_API_TOKEN` secret is correctly set
+- Check token hasn't expired on pypi.org
+- Ensure token has upload permissions
+
+**Package already exists on PyPI:**
+- Cannot re-upload same version
+- Increment version number and release again
+
+**Build warnings about license:**
+- Warnings about `project.license` format are safe to ignore
+- Package will still publish successfully
