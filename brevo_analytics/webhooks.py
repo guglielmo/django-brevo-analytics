@@ -66,34 +66,7 @@ def brevo_webhook(request):
 
     event_date = event_datetime.date()
 
-    # 1. Get or create BrevoMessage (identified by subject + sent_date)
-    message, message_created = BrevoMessage.objects.get_or_create(
-        subject=subject,
-        sent_date=event_date,
-        defaults={
-            'total_sent': 0,
-        }
-    )
-
-    if message_created:
-        logger.info(f"Created new message: {subject} - {event_date}")
-
-    # 2. Get or create BrevoEmail
-    email, email_created = BrevoEmail.objects.get_or_create(
-        brevo_message_id=message_id,
-        defaults={
-            'message': message,
-            'recipient_email': email_address,
-            'sent_at': event_datetime,
-            'current_status': 'sent',
-            'events': []
-        }
-    )
-
-    if email_created:
-        logger.info(f"Created new email: {message_id} to {email_address}")
-
-    # 3. Map Brevo event name to our event type
+    # Map Brevo event name to our event type
     event_mapping = {
         'request': 'sent',
         'delivered': 'delivered',
@@ -108,6 +81,54 @@ def brevo_webhook(request):
     }
 
     our_event_type = event_mapping.get(event_type, event_type)
+    is_sent_event = (our_event_type == 'sent')
+
+    # 1. Try to find existing BrevoEmail
+    try:
+        email = BrevoEmail.objects.select_related('message').get(
+            brevo_message_id=message_id,
+            recipient_email=email_address
+        )
+        message = email.message
+        email_created = False
+        logger.debug(f"Found existing email: {message_id} to {email_address}")
+    except BrevoEmail.DoesNotExist:
+        email = None
+        email_created = True
+
+    # 2. If email doesn't exist and this is NOT a 'sent' event, ignore it
+    #    (same logic as bulk import: only emails with 'sent' event are tracked)
+    if email is None and not is_sent_event:
+        logger.info(
+            f"Ignoring {event_type} event for unknown email {message_id} to {email_address} "
+            f"(no 'sent' event received yet)"
+        )
+        return JsonResponse({'status': 'ignored', 'reason': 'no_sent_event'})
+
+    # 3. If this is a 'sent' event and email doesn't exist, create it
+    if email is None and is_sent_event:
+        # Get or create BrevoMessage (identified by subject + sent_date from 'sent' event)
+        message, message_created = BrevoMessage.objects.get_or_create(
+            subject=subject,
+            sent_date=event_date,
+            defaults={
+                'total_sent': 0,
+            }
+        )
+
+        if message_created:
+            logger.info(f"Created new message: {subject} - {event_date}")
+
+        # Create BrevoEmail with sent_at from this 'sent' event
+        email = BrevoEmail.objects.create(
+            brevo_message_id=message_id,
+            message=message,
+            recipient_email=email_address,
+            sent_at=event_datetime,
+            current_status='sent',
+            events=[]
+        )
+        logger.info(f"Created new email: {message_id} to {email_address}")
 
     # 4. Build event data with extra fields
     extra_data = {}
