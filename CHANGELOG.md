@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-01-27
+
+### Added
+- **Internal Domain Filtering System**: Comprehensive three-level filtering to exclude internal/test emails from analytics
+  - Configure excluded domains via `BREVO_ANALYTICS['EXCLUDED_RECIPIENT_DOMAINS']` setting
+  - Automatic filtering during CSV import prevents internal emails from entering the database
+  - Real-time webhook filtering blocks internal domain events before processing
+  - Model-level query filtering ensures internal emails never appear in analytics views or API responses
+- **Management Command**: `clean_internal_emails` - Remove existing internal emails from database
+  - Supports dry-run mode to preview deletions before applying
+  - Automatically recalculates message statistics after cleanup
+  - Useful for cleaning up data imported before domain filtering was configured
+- **Management Command**: `recalculate_stats` - Recalculate statistics for all messages
+  - Rebuild denormalized statistics from event data
+  - Useful after data cleanup or manual database changes
+  - Ensures dashboard metrics remain accurate
+
+### Fixed
+- **Statistics Accuracy**: Fixed critical bug in `BrevoMessage.update_stats()` that was counting all emails in the database instead of only emails with 'sent' events for the specific message
+  - Delivery rate, open rate, and click rate calculations now correctly reflect actual sent emails
+  - Prevents inflated or incorrect percentage metrics in dashboard
+- **Webhook Event Processing**: Webhook now correctly ignores events that arrive without a prior 'sent' event in the database
+  - Prevents orphaned events from creating incomplete email records
+  - Ensures all tracked emails have complete event history starting from 'sent'
+
+### Changed
+- **Email Model**: Added custom `BrevoEmailQuerySet` and `BrevoEmailManager` for automatic domain filtering at the ORM level
+  - All queries automatically exclude internal domains without manual filtering
+  - Transparent to existing code - filtering happens automatically
+- **Import Command**: Enhanced `import_brevo_logs` to filter internal domains during CSV processing
+  - Reduces database size by excluding test/internal emails from the start
+  - Improves import performance by skipping unnecessary records
+- **Webhook Processing**: Updated webhook handler to filter internal domains in real-time
+  - Prevents test emails from affecting production analytics
+  - Reduces database writes for non-production events
+
+### Technical Details
+- All changes are backward compatible with existing configurations
+- Domain filtering is optional - package works without `EXCLUDED_RECIPIENT_DOMAINS` configuration
+- Custom manager ensures filtering works with all Django ORM query methods (filter, exclude, annotate, etc.)
+- Statistics recalculation is automatically triggered after cleanup operations
+
 ## [0.1.1] - 2026-01-22
 
 ### Changed
