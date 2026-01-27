@@ -103,11 +103,25 @@ class Command(BaseCommand):
 
             self.stdout.write(f"\n🔒 Filtering by allowed senders: {', '.join(allowed_senders)}")
 
+            # Get excluded recipient domains from configuration (default: internal domains)
+            excluded_domains = brevo_config.get('EXCLUDED_RECIPIENT_DOMAINS', ['openpolis.it', 'deppsviluppo.org'])
+            if isinstance(excluded_domains, str):
+                excluded_domains = [excluded_domains]
+
+            if excluded_domains:
+                self.stdout.write(f"🚫 Excluding recipient domains: {', '.join(excluded_domains)}")
+
             # Parse timestamps and map event types
             self.stdout.write("\nPreparing data...")
 
             # Build WHERE clause for allowed senders
             senders_clause = " OR ".join([f"frm = '{sender}'" for sender in allowed_senders])
+
+            # Build WHERE clause to exclude internal recipient domains
+            excluded_clause = ""
+            if excluded_domains:
+                excluded_conditions = " AND ".join([f"email NOT LIKE '%@{domain}'" for domain in excluded_domains])
+                excluded_clause = f"AND ({excluded_conditions})"
 
             conn.execute(f"""
                 CREATE TABLE parsed_logs AS
@@ -125,6 +139,7 @@ class Command(BaseCommand):
                   AND email IS NOT NULL
                   AND sub IS NOT NULL
                   AND ({senders_clause})
+                  {excluded_clause}
             """)
 
             parsed_count = conn.execute("SELECT COUNT(*) FROM parsed_logs").fetchone()[0]
