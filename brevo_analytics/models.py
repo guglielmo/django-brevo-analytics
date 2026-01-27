@@ -112,7 +112,7 @@ class BrevoMessage(models.Model):
 
 
 class BrevoEmailQuerySet(models.QuerySet):
-    """Custom QuerySet for BrevoEmail with domain filtering"""
+    """Custom QuerySet for BrevoEmail with domain and sender filtering"""
 
     def exclude_internal_domains(self):
         """Exclude emails sent to internal domains (configurable)"""
@@ -133,16 +133,43 @@ class BrevoEmailQuerySet(models.QuerySet):
 
         return self.exclude(exclude_q)
 
+    def filter_by_allowed_senders(self):
+        """Filter to include only emails from authorized senders (multi-tenant security)"""
+        brevo_config = getattr(settings, 'BREVO_ANALYTICS', {})
+        allowed_senders = brevo_config.get('ALLOWED_SENDERS', [])
+
+        if isinstance(allowed_senders, str):
+            allowed_senders = [allowed_senders]
+
+        if not allowed_senders:
+            # No filtering if no senders configured
+            return self
+
+        # Include emails with sender_email in allowed list OR sender_email is NULL
+        # (NULL for backward compatibility with old data before sender tracking)
+        from django.db.models import Q
+        filter_q = Q(sender_email__isnull=True)
+        for sender in allowed_senders:
+            filter_q |= Q(sender_email__iexact=sender)
+
+        return self.filter(filter_q)
+
 
 class BrevoEmailManager(models.Manager):
     """Custom Manager for BrevoEmail"""
 
     def get_queryset(self):
-        """Return queryset excluding internal domains by default"""
-        return BrevoEmailQuerySet(self.model, using=self._db).exclude_internal_domains()
+        """Return queryset excluding internal domains and filtering by allowed senders"""
+        return (BrevoEmailQuerySet(self.model, using=self._db)
+                .exclude_internal_domains()
+                .filter_by_allowed_senders())
 
     def all_including_internal(self):
-        """Return all emails including internal domains (for admin/debugging)"""
+        """Return all emails including internal domains but still filtered by sender"""
+        return BrevoEmailQuerySet(self.model, using=self._db).filter_by_allowed_senders()
+
+    def all_unfiltered(self):
+        """Return ALL emails without any filtering (admin/debugging only)"""
         return BrevoEmailQuerySet(self.model, using=self._db)
 
 
@@ -171,6 +198,12 @@ class BrevoEmail(models.Model):
         max_length=255,
         db_index=True,
         help_text="Brevo's message ID (shared across campaign recipients)"
+    )
+    sender_email = models.EmailField(
+        db_index=True,
+        null=True,
+        blank=True,
+        help_text="Sender email address (for multi-tenant filtering)"
     )
     recipient_email = models.EmailField(db_index=True)
     sent_at = models.DateTimeField(db_index=True)

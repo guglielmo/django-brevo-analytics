@@ -203,7 +203,11 @@ BREVO_ANALYTICS = {
     'WEBHOOK_SECRET': 'your-webhook-secret-here',  # From Brevo dashboard
     'CLIENT_UID': 'your-client-uuid',              # For tracking
     'API_KEY': 'your-brevo-api-key',               # Optional: for bounce enrichment
-    'ALLOWED_SENDERS': ['info@infoparlamento.it'], # Filter by sender email
+
+    # CRITICAL: Multi-tenant security - only process events from your senders
+    'ALLOWED_SENDERS': ['info@infoparlamento.it'], # REQUIRED: Your authorized sender email(s)
+
+    # Exclude internal test/error emails
     'EXCLUDED_RECIPIENT_DOMAINS': [                # Exclude internal domains
         'openpolis.it',
         'deppsviluppo.org'
@@ -283,6 +287,8 @@ Root files:
 
 7. **Internal Domain Filtering**: Emails sent to internal domains (configurable via `EXCLUDED_RECIPIENT_DOMAINS`) are automatically excluded from import, webhooks, and queries. This prevents internal error notifications and test emails from skewing production statistics.
 
+8. **Multi-Tenant Security**: Sender filtering (`ALLOWED_SENDERS`) prevents webhook events and data from other clients on shared Brevo accounts from contaminating your analytics. All queries automatically filter by authorized senders.
+
 ## Common Development Tasks
 
 ### Running Tests in Development Project
@@ -292,6 +298,23 @@ cd ~/Workspace/infoparlamento
 source venv/bin/activate
 DJANGO_READ_DOT_ENV_FILE=1 python manage.py test brevo_analytics
 ```
+
+### Database Migration for sender_email Field
+
+**⚠️ REQUIRED for v0.2.1+**: The BrevoEmail model now includes a `sender_email` field for multi-tenant security. You must create and apply this migration:
+
+```bash
+cd ~/Workspace/infoparlamento
+source venv/bin/activate
+
+# Create migration for the new field
+DJANGO_READ_DOT_ENV_FILE=1 python manage.py makemigrations brevo_analytics
+
+# Apply the migration
+DJANGO_READ_DOT_ENV_FILE=1 python manage.py migrate brevo_analytics
+```
+
+The field is nullable to maintain backward compatibility with existing data. New imports and webhook events will populate this field automatically.
 
 ### Importing Historical Data from Raw Logs
 

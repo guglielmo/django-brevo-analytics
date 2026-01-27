@@ -52,10 +52,30 @@ def brevo_webhook(request):
     email_address = payload.get('email')
     subject = payload.get('subject', '')
     timestamp_unix = payload.get('ts_event')
+    sender = payload.get('sender') or payload.get('from', '')  # Brevo might use 'sender' or 'from'
 
     if not all([event_type, message_id, email_address, timestamp_unix]):
         logger.error(f"Missing required fields in webhook: {payload}")
         return HttpResponseBadRequest('Missing required fields')
+
+    # CRITICAL: Verify sender is authorized (multi-tenant security)
+    allowed_senders = config.get('ALLOWED_SENDERS', ['info@infoparlamento.it'])
+    if isinstance(allowed_senders, str):
+        allowed_senders = [allowed_senders]
+
+    if allowed_senders and sender:
+        sender_lower = sender.lower()
+        if not any(allowed.lower() == sender_lower for allowed in allowed_senders):
+            logger.warning(
+                f"Ignoring webhook event from unauthorized sender: {sender} "
+                f"(allowed: {', '.join(allowed_senders)})"
+            )
+            return JsonResponse({'status': 'ignored', 'reason': 'unauthorized_sender'})
+    elif allowed_senders and not sender:
+        # No sender info in payload - log warning but allow (for backward compatibility)
+        logger.warning(
+            f"Webhook event has no sender information. Payload keys: {list(payload.keys())}"
+        )
 
     # Check if email is to an excluded internal domain
     excluded_domains = config.get('EXCLUDED_RECIPIENT_DOMAINS', ['openpolis.it', 'deppsviluppo.org'])
@@ -135,12 +155,13 @@ def brevo_webhook(request):
         email = BrevoEmail.objects.create(
             brevo_message_id=message_id,
             message=message,
+            sender_email=sender if sender else None,
             recipient_email=email_address,
             sent_at=event_datetime,
             current_status='sent',
             events=[]
         )
-        logger.info(f"Created new email: {message_id} to {email_address}")
+        logger.info(f"Created new email: {message_id} to {email_address} from {sender}")
 
     # 4. Build event data with extra fields
     extra_data = {}

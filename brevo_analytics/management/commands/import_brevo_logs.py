@@ -165,6 +165,8 @@ class Command(BaseCommand):
                     p.email,
                     -- Take the first non-null subject (they should all be the same)
                     FIRST(p.subject ORDER BY p.event_timestamp) as subject,
+                    -- Take sender from first event
+                    FIRST(p.frm ORDER BY p.event_timestamp) as sender,
                     MIN(CASE WHEN p.st_text = 'Inviata'
                         THEN p.event_timestamp END) as sent_at,
                     LIST({
@@ -233,7 +235,7 @@ class Command(BaseCommand):
                 }
 
                 for row in batch:
-                    mid, recipient_email, subject, sent_at_raw, events_raw = row
+                    mid, recipient_email, subject, sender, sent_at_raw, events_raw = row
 
                     # Skip if already processed globally (safety check for duplicates in CSV)
                     combination_key = (mid, recipient_email)
@@ -343,6 +345,7 @@ class Command(BaseCommand):
                     if combination_key in existing_emails:
                         email = existing_emails[combination_key]
                         email.message = message
+                        email.sender_email = sender if sender else None
                         email.recipient_email = recipient_email
                         email.sent_at = sent_at
                         email.events = events_list
@@ -352,6 +355,7 @@ class Command(BaseCommand):
                         email = BrevoEmail(
                             brevo_message_id=mid,
                             message=message,
+                            sender_email=sender if sender else None,
                             recipient_email=recipient_email,
                             sent_at=sent_at,
                             events=events_list,
@@ -366,7 +370,7 @@ class Command(BaseCommand):
                     if emails_to_update:
                         BrevoEmail.objects.bulk_update(
                             emails_to_update,
-                            ['message', 'recipient_email', 'sent_at', 'events', 'current_status'],
+                            ['message', 'sender_email', 'recipient_email', 'sent_at', 'events', 'current_status'],
                             batch_size=500
                         )
 
