@@ -57,6 +57,18 @@ def brevo_webhook(request):
         logger.error(f"Missing required fields in webhook: {payload}")
         return HttpResponseBadRequest('Missing required fields')
 
+    # Check if email is to an excluded internal domain
+    excluded_domains = config.get('EXCLUDED_RECIPIENT_DOMAINS', ['openpolis.it', 'deppsviluppo.org'])
+    if isinstance(excluded_domains, str):
+        excluded_domains = [excluded_domains]
+
+    if excluded_domains:
+        email_lower = email_address.lower()
+        for domain in excluded_domains:
+            if email_lower.endswith(f'@{domain}'):
+                logger.info(f"Ignoring webhook event for internal domain: {email_address}")
+                return JsonResponse({'status': 'ignored', 'reason': 'internal_domain'})
+
     # Convert timestamp
     try:
         event_datetime = datetime.fromtimestamp(timestamp_unix, tz=timezone.utc)

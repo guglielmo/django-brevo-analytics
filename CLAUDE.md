@@ -202,6 +202,12 @@ CORS_ALLOWED_ORIGINS = [
 BREVO_ANALYTICS = {
     'WEBHOOK_SECRET': 'your-webhook-secret-here',  # From Brevo dashboard
     'CLIENT_UID': 'your-client-uuid',              # For tracking
+    'API_KEY': 'your-brevo-api-key',               # Optional: for bounce enrichment
+    'ALLOWED_SENDERS': ['info@infoparlamento.it'], # Filter by sender email
+    'EXCLUDED_RECIPIENT_DOMAINS': [                # Exclude internal domains
+        'openpolis.it',
+        'deppsviluppo.org'
+    ],
 }
 ```
 
@@ -275,6 +281,8 @@ Root files:
 
 6. **Single-Tenant**: One client per Django instance (no multi-tenant complexity). Client ID stored in settings.
 
+7. **Internal Domain Filtering**: Emails sent to internal domains (configurable via `EXCLUDED_RECIPIENT_DOMAINS`) are automatically excluded from import, webhooks, and queries. This prevents internal error notifications and test emails from skewing production statistics.
+
 ## Common Development Tasks
 
 ### Running Tests in Development Project
@@ -305,6 +313,50 @@ DJANGO_READ_DOT_ENV_FILE=1 python manage.py import_brevo_logs \
   /home/gu/Workspace/lab.prototypes/brevo-analytics/logs_infoparlamento_202512_today.csv \
   --clear
 ```
+
+**Note:** The import command automatically excludes emails sent to internal domains configured in `EXCLUDED_RECIPIENT_DOMAINS` (default: openpolis.it, deppsviluppo.org).
+
+### Cleaning Existing Internal Domain Emails
+
+If you have already imported data that includes emails to internal domains, use this command to clean them:
+
+```bash
+cd ~/Workspace/infoparlamento
+source venv/bin/activate
+
+# Preview what would be deleted (dry-run)
+DJANGO_READ_DOT_ENV_FILE=1 python manage.py clean_internal_emails --dry-run
+
+# Actually delete internal emails and recalculate statistics
+DJANGO_READ_DOT_ENV_FILE=1 python manage.py clean_internal_emails
+```
+
+This command will:
+- Find all emails sent to excluded domains (openpolis.it, deppsviluppo.org)
+- Delete them from the database
+- Recalculate statistics for affected messages
+- Delete messages with zero remaining emails
+
+### Recalculating Message Statistics
+
+If you need to recalculate statistics for all messages (e.g., after a bug fix or data cleanup):
+
+```bash
+cd ~/Workspace/infoparlamento
+source venv/bin/activate
+
+# Recalculate all messages
+DJANGO_READ_DOT_ENV_FILE=1 python manage.py recalculate_stats
+
+# Recalculate specific message by ID
+DJANGO_READ_DOT_ENV_FILE=1 python manage.py recalculate_stats --message-id 123
+```
+
+This command will:
+- Count emails with 'sent' events in their event timeline
+- Update delivery_rate, open_rate, and click_rate
+- Show before/after statistics
+- Identify messages with zero sent emails for cleanup
 
 ### Testing Webhook Locally
 

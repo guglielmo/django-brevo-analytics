@@ -2,6 +2,7 @@ import uuid
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django.conf import settings
 
 
 class BrevoMessage(models.Model):
@@ -71,6 +72,15 @@ class BrevoMessage(models.Model):
         first_sent = emails.aggregate(first_sent=Min('sent_at'))['first_sent']
         self.sent_at = first_sent
 
+        # Conta email con evento 'sent' effettivo
+        # Dobbiamo verificare nell'array events che ci sia un evento di tipo 'sent'
+        sent_count = 0
+        for email in emails:
+            for event in email.events:
+                if event.get('type') == 'sent':
+                    sent_count += 1
+                    break  # Un solo evento sent per email
+
         # Conta per status
         stats = emails.aggregate(
             delivered=Count('id', filter=Q(current_status__in=['delivered', 'opened', 'clicked'])),
@@ -80,7 +90,7 @@ class BrevoMessage(models.Model):
             blocked=Count('id', filter=Q(current_status='blocked')),
         )
 
-        self.total_sent = total
+        self.total_sent = sent_count
         self.total_delivered = stats['delivered']
         self.total_opened = stats['opened']
         self.total_clicked = stats['clicked']
@@ -101,6 +111,41 @@ class BrevoMessage(models.Model):
         ])
 
 
+class BrevoEmailQuerySet(models.QuerySet):
+    """Custom QuerySet for BrevoEmail with domain filtering"""
+
+    def exclude_internal_domains(self):
+        """Exclude emails sent to internal domains (configurable)"""
+        brevo_config = getattr(settings, 'BREVO_ANALYTICS', {})
+        excluded_domains = brevo_config.get('EXCLUDED_RECIPIENT_DOMAINS', ['openpolis.it', 'deppsviluppo.org'])
+
+        if isinstance(excluded_domains, str):
+            excluded_domains = [excluded_domains]
+
+        if not excluded_domains:
+            return self
+
+        # Build Q objects to exclude all domains
+        from django.db.models import Q
+        exclude_q = Q()
+        for domain in excluded_domains:
+            exclude_q |= Q(recipient_email__iendswith=f'@{domain}')
+
+        return self.exclude(exclude_q)
+
+
+class BrevoEmailManager(models.Manager):
+    """Custom Manager for BrevoEmail"""
+
+    def get_queryset(self):
+        """Return queryset excluding internal domains by default"""
+        return BrevoEmailQuerySet(self.model, using=self._db).exclude_internal_domains()
+
+    def all_including_internal(self):
+        """Return all emails including internal domains (for admin/debugging)"""
+        return BrevoEmailQuerySet(self.model, using=self._db)
+
+
 class BrevoEmail(models.Model):
     """Singola email inviata a un destinatario"""
 
@@ -116,6 +161,7 @@ class BrevoEmail(models.Model):
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    objects = BrevoEmailManager()  # Custom manager that excludes internal domains
     message = models.ForeignKey(
         BrevoMessage,
         on_delete=models.CASCADE,
