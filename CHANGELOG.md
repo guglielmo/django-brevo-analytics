@@ -7,6 +7,110 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-01-27
+
+### Security
+
+**CRITICAL SECURITY PATCH - IMMEDIATE UPDATE REQUIRED**
+
+- **Multi-Tenant Data Contamination Vulnerability**: Fixed critical security flaw where webhook accepted events from ANY sender on shared Brevo account
+  - **Impact**: Before this fix, webhook processed events from all clients sharing the same Brevo account, mixing data from different organizations into the same database
+  - **Severity**: CRITICAL - Potential for unauthorized access to analytics data from other tenants
+  - **Resolution**: Webhook now validates sender email against `ALLOWED_SENDERS` configuration before processing any events
+
+### Added
+
+- **Sender Email Tracking**: New `sender_email` field in `BrevoEmail` model
+  - Captures sender address from every Brevo event
+  - Enables sender-based filtering and data isolation
+  - Indexed for fast queries
+- **Sender Validation**: Automatic sender verification in webhook processing
+  - Only events from senders in `BREVO_ANALYTICS['ALLOWED_SENDERS']` are processed
+  - Unauthorized sender events are logged and rejected
+  - Prevents data contamination from other tenants on shared Brevo accounts
+- **ORM-Level Sender Filtering**: Enhanced `BrevoEmailManager` with automatic sender filtering
+  - All database queries automatically exclude unauthorized senders
+  - Transparent filtering - no code changes required in existing applications
+  - Works with all Django ORM methods (filter, exclude, annotate, etc.)
+- **Management Command**: `verify_senders` - Identify potentially contaminated data
+  - Scans database for emails from unauthorized senders
+  - Reports statistics on data contamination
+  - Supports dry-run mode to preview issues before cleanup
+  - Helps assess impact of vulnerability on existing installations
+
+### Changed
+
+- **Database Schema**: Added `sender_email` field to `BrevoEmail` model
+  - **Migration Required**: Run `python manage.py migrate brevo_analytics` after update
+  - Nullable field for backward compatibility with existing data
+  - Future webhook events will populate this field automatically
+- **Configuration Requirement**: `ALLOWED_SENDERS` setting is now MANDATORY
+  - Must be configured in `BREVO_ANALYTICS['ALLOWED_SENDERS']` setting
+  - List of authorized sender email addresses for your organization
+  - Events from unlisted senders will be rejected
+  - Example: `ALLOWED_SENDERS = ['noreply@example.com', 'alerts@example.com']`
+- **Webhook Behavior**: Enhanced event processing with sender validation
+  - Extracts sender email from `from` or `sender` webhook fields
+  - Validates against ALLOWED_SENDERS before database operations
+  - Logs rejection of unauthorized sender events for audit trail
+
+### Migration Guide
+
+**CRITICAL - Action Required for All Installations:**
+
+1. **Update Package**:
+   ```bash
+   pip install --upgrade django-brevo-analytics==0.2.1
+   ```
+
+2. **Configure ALLOWED_SENDERS** in Django settings:
+   ```python
+   BREVO_ANALYTICS = {
+       'WEBHOOK_SECRET': 'your-webhook-secret',
+       'CLIENT_UID': 'your-client-uuid',
+       'ALLOWED_SENDERS': [
+           'noreply@yourcompany.com',
+           'alerts@yourcompany.com',
+           # Add all legitimate sender addresses for your organization
+       ],
+   }
+   ```
+
+3. **Run Database Migration**:
+   ```bash
+   python manage.py migrate brevo_analytics
+   ```
+
+4. **Verify Existing Data** (optional but recommended):
+   ```bash
+   # Check for potentially contaminated data
+   python manage.py verify_senders
+   ```
+
+5. **Re-import Historical Data** (recommended):
+   ```bash
+   # Clear and reimport to populate sender_email field
+   python manage.py import_brevo_logs /path/to/logs.csv --clear
+   ```
+
+### Impact Assessment
+
+**Before Fix:**
+- Webhook accepted events from ANY sender on shared Brevo account
+- Analytics data could include emails from other organizations
+- No sender validation or isolation between tenants
+- Potential for data leakage in multi-tenant Brevo accounts
+
+**After Fix:**
+- Only authorized senders (configured in ALLOWED_SENDERS) are processed
+- Automatic sender validation on all webhook events
+- ORM-level filtering ensures unauthorized data never appears in queries
+- Complete data isolation for multi-tenant environments
+
+**Affected Versions**: All versions prior to 0.2.1
+
+**Recommended Action**: Immediate update for all installations, especially those on shared Brevo accounts
+
 ## [0.2.0] - 2026-01-27
 
 ### Added
