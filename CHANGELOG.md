@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-01-27
+
+### Fixed
+
+- **Missing Migration File**: Included Django migration file (`0005_brevoemail_sender_email.py`) that was inadvertently omitted from v0.2.1 package
+  - Users who installed v0.2.1 encountered errors when running `python manage.py migrate brevo_analytics`
+  - Migration creates the `sender_email` field required for sender validation introduced in v0.2.1
+  - This hotfix completes the security patch from v0.2.1 by providing the required database schema changes
+
+### Migration Note
+
+**For users who installed v0.2.1:**
+- Upgrade immediately to v0.2.2 to get the missing migration file
+- Run `python manage.py migrate brevo_analytics` after upgrading
+- No other changes required - all configuration from v0.2.1 remains valid
+
+**For new installations:**
+- This version includes all migrations needed for the sender validation security feature
+- Follow the standard installation and configuration steps from the README
+
+### Technical Details
+
+- Added migration file: `brevo_analytics/migrations/0005_brevoemail_sender_email.py`
+- Creates `sender_email` field on `BrevoEmail` model (nullable CharField, indexed)
+- No code changes - purely a packaging fix to include the migration in the distribution
+
 ## [0.2.1] - 2026-01-27
 
 ### Security
