@@ -29,7 +29,7 @@ A reusable Django package that integrates transactional email analytics from Bre
 
 ### Real-time Webhook Integration
 - **Instant Updates**: Process Brevo events as they occur
-- **HMAC Validation**: Secure webhook signature verification
+- **Bearer Token Authentication**: Secure webhook authentication via Authorization header
 - **Auto-enrichment**: Bounce reasons automatically fetched from Brevo API
 
 ### Historical Data Import
@@ -161,7 +161,7 @@ Compares local statistics with Brevo API to ensure data accuracy.
 - **Responsive Design**: Mobile-friendly interface
 
 ### Security
-- **HMAC Webhook Validation**: Verify webhook signatures from Brevo
+- **Bearer Token Webhook Authentication**: Verify webhook authenticity via Authorization header
 - **Admin Permissions**: All views require Django staff access
 - **CORS Protection**: Configurable CORS for API endpoints
 - **SQL Injection Safe**: Django ORM prevents SQL injection
@@ -228,7 +228,7 @@ python -m build
 
 - Verify `WEBHOOK_SECRET` matches Brevo configuration
 - Check webhook URL is publicly accessible
-- Review Django logs for HMAC validation errors
+- Review Django logs for authentication errors
 - Test webhook with `curl` to check connectivity
 
 ### Empty Dashboard

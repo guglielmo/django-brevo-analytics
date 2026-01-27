@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-01-27
+
+### Fixed
+
+- **Webhook Authentication**: Fixed critical bug where webhook validation was looking for non-existent `X-Brevo-Signature` HMAC header
+  - Brevo actually sends authentication as `Authorization: Bearer <token>` header
+  - Changed webhook authentication from HMAC signature validation to Bearer token validation
+  - This bug caused all webhook requests to fail with "Invalid webhook signature" warnings since v0.1.0
+  - Webhook now correctly validates the Bearer token from `Authorization` header against `WEBHOOK_SECRET` setting
+- **Sender Email Extraction**: Enhanced sender field extraction to support `sender_email` field in webhook payloads
+  - Webhook now checks `sender`, `from`, and `sender_email` fields (in that order) to extract sender information
+  - Eliminates "no sender information" warnings for events that include `sender_email` field
+
+### Technical Details
+
+- Removed unused `hmac` and `hashlib` imports from webhook handler
+- Simplified authentication logic: direct string comparison of Bearer token instead of HMAC computation
+- Maintains backward compatibility with existing `WEBHOOK_SECRET` configuration
+
 ## [0.2.2] - 2026-01-27
 
 ### Fixed

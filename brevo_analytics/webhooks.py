@@ -1,5 +1,3 @@
-import hmac
-import hashlib
 import json
 import logging
 from django.http import JsonResponse, HttpResponseBadRequest
@@ -23,21 +21,26 @@ def brevo_webhook(request):
     URL: https://your-domain.com/brevo-analytics/webhook/
     Events: All transactional email events
     """
-    # Verify webhook signature (if configured)
+    # Verify webhook authentication (if configured)
     config = getattr(settings, 'BREVO_ANALYTICS', {})
     webhook_secret = config.get('WEBHOOK_SECRET')
 
     if webhook_secret:
-        signature = request.headers.get('X-Brevo-Signature', '')
-        computed_signature = hmac.new(
-            webhook_secret.encode(),
-            request.body,
-            hashlib.sha256
-        ).hexdigest()
+        # Brevo uses Bearer token authentication in Authorization header
+        auth_header = request.headers.get('Authorization', '')
 
-        if signature != computed_signature:
-            logger.warning("Invalid webhook signature")
-            return HttpResponseBadRequest('Invalid signature')
+        # Extract token from "Bearer <token>" format
+        if auth_header.startswith('Bearer '):
+            received_token = auth_header[7:]  # Remove "Bearer " prefix
+        else:
+            received_token = ''
+
+        if received_token != webhook_secret:
+            logger.warning(
+                f"Invalid webhook authentication - "
+                f"expected Bearer token but received: {auth_header[:20]}..."
+            )
+            return HttpResponseBadRequest('Invalid authentication')
 
     # Parse webhook payload
     try:
@@ -52,7 +55,7 @@ def brevo_webhook(request):
     email_address = payload.get('email')
     subject = payload.get('subject', '')
     timestamp_unix = payload.get('ts_event')
-    sender = payload.get('sender') or payload.get('from', '')  # Brevo might use 'sender' or 'from'
+    sender = payload.get('sender') or payload.get('from') or payload.get('sender_email', '')  # Brevo uses 'sender_email' in some events
 
     if not all([event_type, message_id, email_address, timestamp_unix]):
         logger.error(f"Missing required fields in webhook: {payload}")
