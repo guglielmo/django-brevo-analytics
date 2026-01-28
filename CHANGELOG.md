@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-01-28
+
+### Fixed
+
+- **Internationalization**: Fixed untranslated KPI filter labels in Message Emails view
+  - Status filter buttons (Sent, Delivered, Opened, Clicked, Bounced, Blocked) now properly use i18n translation keys
+  - Labels were previously hardcoded in English, preventing proper localization
+  - All KPI filter labels now use `$t()` function for dynamic translation based on user locale
+  - Improves user experience for non-English speakers
+
+### Technical Details
+
+- Updated Vue.js SPA template to replace hardcoded English labels with i18n keys
+- Modified KPI filter button rendering in Message Emails view component
+- Maintains existing functionality while enabling proper multilingual support
+
 ## [0.2.3] - 2026-01-27
 
 ### Fixed
