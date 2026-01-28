@@ -555,42 +555,42 @@ const MessageEmails = {
             class="kpi-card"
             :class="{ active: activeFilter === 'sent' }"
             @click="setFilter('sent')">
-            <div class="kpi-label">Sent</div>
+            <div class="kpi-label">{{ t('sent_status') }}</div>
             <div class="kpi-value">{{ message.total_sent }}</div>
           </div>
           <div
             class="kpi-card"
             :class="{ active: activeFilter === 'delivered' }"
             @click="setFilter('delivered')">
-            <div class="kpi-label">Delivered</div>
+            <div class="kpi-label">{{ t('delivered_status') }}</div>
             <div class="kpi-value">{{ message.total_delivered }}</div>
           </div>
           <div
             class="kpi-card"
             :class="{ active: activeFilter === 'opened' }"
             @click="setFilter('opened')">
-            <div class="kpi-label">Opened</div>
+            <div class="kpi-label">{{ t('opened_status') }}</div>
             <div class="kpi-value">{{ message.total_opened }}</div>
           </div>
           <div
             class="kpi-card"
             :class="{ active: activeFilter === 'clicked' }"
             @click="setFilter('clicked')">
-            <div class="kpi-label">Clicked</div>
+            <div class="kpi-label">{{ t('clicked_status') }}</div>
             <div class="kpi-value">{{ message.total_clicked }}</div>
           </div>
           <div
             class="kpi-card"
             :class="{ active: activeFilter === 'bounced' }"
             @click="setFilter('bounced')">
-            <div class="kpi-label">Bounced</div>
+            <div class="kpi-label">{{ t('bounced_status') }}</div>
             <div class="kpi-value">{{ message.total_bounced }}</div>
           </div>
           <div
             class="kpi-card"
             :class="{ active: activeFilter === 'blocked' }"
             @click="setFilter('blocked')">
-            <div class="kpi-label">Blocked</div>
+            <div class="kpi-label">{{ t('blocked_status') }}</div>
             <div class="kpi-value">{{ message.total_blocked }}</div>
           </div>
         </div>
