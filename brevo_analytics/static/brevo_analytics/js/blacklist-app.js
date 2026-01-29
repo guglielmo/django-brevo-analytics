@@ -284,15 +284,7 @@ const CheckEmailTab = {
 const ListAllTab = {
   template: `
     <div class="blacklist-tab">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h2 style="margin: 0;">Lista Completa Blacklist</h2>
-        <button
-          @click="enrichDatabase"
-          :disabled="enriching"
-          style="padding: 10px 20px; background: #417690; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
-          {{ enriching ? 'Arricchimento in corso...' : '🔄 Arricchisci DB' }}
-        </button>
-      </div>
+      <h2 style="margin-bottom: 20px;">Lista Completa Blacklist</h2>
 
       <!-- Istruzioni collapsabili -->
       <div class="alert" style="margin-bottom: 30px; border-radius: 8px; border-left: 4px solid #417690; background: #f0f7fa;">
@@ -548,7 +540,6 @@ const ListAllTab = {
     const searchQuery = ref('')
     const selectedEmails = ref([])
     const removingMultiple = ref(false)
-    const enriching = ref(false)
 
     // Stato istruzioni (localStorage)
     const instructionsOpen = ref(
@@ -745,32 +736,6 @@ const ListAllTab = {
       await loadContacts()
     }
 
-    const enrichDatabase = async () => {
-      const confirmed = confirm(
-        'Arricchire tutte le email blocked nel database con le informazioni dalla blacklist Brevo?\n\n' +
-        'Questa operazione può richiedere alcuni minuti.'
-      )
-
-      if (!confirmed) return
-
-      enriching.value = true
-
-      try {
-        const data = await api.post('/api/blacklist/enrich/', { force: false })
-
-        alert(
-          `Arricchimento completato!\n\n` +
-          `Email processate: ${data.total_processed}\n` +
-          `Arricchite: ${data.enriched}\n` +
-          `Non trovate in blacklist: ${data.not_found}`
-        )
-      } catch (e) {
-        alert(`Errore: ${e.message}`)
-      } finally {
-        enriching.value = false
-      }
-    }
-
     const toggleRowSelection = (email, event) => {
       // Don't toggle if clicking on checkbox or button (they have @click.stop)
       const index = selectedEmails.value.indexOf(email)
@@ -867,7 +832,6 @@ const ListAllTab = {
       searchQuery,
       selectedEmails,
       removingMultiple,
-      enriching,
       instructionsOpen,
       t,
       toggleInstructions,
@@ -883,7 +847,6 @@ const ListAllTab = {
       toggleRowSelection,
       removeSingle,
       removeSelected,
-      enrichDatabase,
       normalizeReasonClass,
       formatReason,
       formatDateTime  // Use global helper

@@ -457,6 +457,14 @@ Edit `brevo_analytics/__init__.py`:
 __version__ = '0.2.0'  # Update to new version
 ```
 
+Edit `pyproject.toml`
+```
+[project]                                                                                                                                    
+ name = "django-brevo-analytics"                                                                                                              
+ version = "0.2.4"                                                                                                                             
+ ...
+```
+
 #### 2. Update CHANGELOG.md
 
 Add release notes in [Keep a Changelog](https://keepachangelog.com/) format:
