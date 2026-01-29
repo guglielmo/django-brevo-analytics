@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-01-29
+
+### Removed
+
+- **Blacklist Management UI**: Removed "Arricchisci DB" (Enrich Database) button from blacklist management interface
+  - Button allowed enriching local blocked emails database with information from Brevo blacklist
+  - Functionality removed as it's no longer needed in the current workflow
+  - Simplified UI by removing unnecessary operation button
+  - Removed `enrichDatabase()` function and related state management from Vue.js component
+
+### Technical Details
+
+- Removed enrichment button from ListAllTab component template
+- Removed `enriching` reactive state reference
+- Removed `enrichDatabase` async function
+- Cleaned up component return statement to remove unused references
+
 ## [0.2.4] - 2026-01-28
 
 ### Fixed
