@@ -267,6 +267,11 @@ class BrevoEmail(models.Model):
                 # Evento già presente, skip
                 return False
 
+        # Special case: if adding a real 'sent' event and an inferred 'sent' exists, remove the inferred one
+        if event_type == 'sent' and not extra_data.get('inferred', False):
+            # This is a real 'sent' event, check if we have an inferred one
+            self.events = [e for e in self.events if not (e.get('type') == 'sent' and e.get('inferred', False))]
+
         # Aggiungi nuovo evento
         event_data = {
             'type': event_type,

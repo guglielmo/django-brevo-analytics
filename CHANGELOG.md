@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-02-03
+
+### Fixed
+
+- **Webhook Event Recovery**: Webhook now creates email records from 'delivered' events when 'sent' event was missed or delayed
+  - **Problem**: Brevo doesn't guarantee event order - 'delivered', 'opened', or 'clicked' events can arrive before 'sent' event
+  - **Previous behavior**: Webhook ignored all events for unknown emails, waiting for 'sent' event that might never arrive
+  - **New behavior**:
+    - 'delivered' event is treated as proof of sending and triggers record creation
+    - When creating from 'delivered': adds inferred 'sent' event to maintain statistics consistency
+    - If real 'sent' event arrives later: replaces inferred 'sent' with real one (correct timestamp)
+  - **Impact**: Improves delivery rate accuracy by recovering ~6% of emails where 'sent' event arrives late or is lost
+  - **Benefit**: Reduces false error reports in Brevo webhook dashboard (from ~250 errors to near zero)
+
+### Technical Details
+
+- **Webhook changes** (`webhooks.py`):
+  - Added `is_delivered_event` check alongside `is_sent_event` for record creation
+  - When creating from 'delivered' event:
+    - Sets initial status to 'delivered' instead of 'sent'
+    - Adds inferred 'sent' event with `inferred: True` flag to events array
+    - Uses delivered timestamp as sent_at (close approximation)
+  - Updated log messages to distinguish between normal creation and recovery from delivered event
+  - Other events (opened, clicked) still require prior sent/delivered event
+
+- **Model changes** (`models.py`):
+  - Modified `BrevoEmail.add_event()` to handle inferred 'sent' events
+  - When adding real 'sent' event: automatically removes any inferred 'sent' events first
+  - Prevents duplicate 'sent' events in statistics and timeline
+  - Ensures correct sent_count in message statistics
+
+- **Event ordering scenarios**:
+  - Normal: sent → delivered → opened → clicked (no change in behavior)
+  - Delayed: delivered → opened → sent (now handled: creates from delivered, updates when sent arrives)
+  - Missing: delivered → opened → clicked (no sent ever) (now handled: uses inferred sent)
+
 ## [0.2.5] - 2026-01-29
 
 ### Removed

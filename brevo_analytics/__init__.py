@@ -6,4 +6,4 @@ A reusable Django package for viewing Brevo transactional email
 analytics in Django admin.
 """
 
-__version__ = '0.2.5'
+__version__ = '0.2.6'
