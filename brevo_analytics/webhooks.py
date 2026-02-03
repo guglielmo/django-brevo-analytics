@@ -117,6 +117,10 @@ def brevo_webhook(request):
 
     our_event_type = event_mapping.get(event_type, event_type)
     is_sent_event = (our_event_type == 'sent')
+    is_delivered_event = (our_event_type == 'delivered')
+
+    # Treat 'delivered' as proof of 'sent' for creating records
+    is_creation_event = is_sent_event or is_delivered_event
 
     # 1. Try to find existing BrevoEmail
     try:
@@ -131,18 +135,18 @@ def brevo_webhook(request):
         email = None
         email_created = True
 
-    # 2. If email doesn't exist and this is NOT a 'sent' event, ignore it
-    #    (same logic as bulk import: only emails with 'sent' event are tracked)
-    if email is None and not is_sent_event:
+    # 2. If email doesn't exist and this is NOT a 'sent' or 'delivered' event, ignore it
+    #    Rationale: 'delivered' proves the email was sent, even if we missed the 'sent' event
+    if email is None and not is_creation_event:
         logger.info(
             f"Ignoring {event_type} event for unknown email {message_id} to {email_address} "
-            f"(no 'sent' event received yet)"
+            f"(no 'sent' or 'delivered' event received yet)"
         )
         return JsonResponse({'status': 'ignored', 'reason': 'no_sent_event'})
 
-    # 3. If this is a 'sent' event and email doesn't exist, create it
-    if email is None and is_sent_event:
-        # Get or create BrevoMessage (identified by subject + sent_date from 'sent' event)
+    # 3. If this is a 'sent' or 'delivered' event and email doesn't exist, create it
+    if email is None and is_creation_event:
+        # Get or create BrevoMessage (identified by subject + sent_date)
         message, message_created = BrevoMessage.objects.get_or_create(
             subject=subject,
             sent_date=event_date,
@@ -154,15 +158,36 @@ def brevo_webhook(request):
         if message_created:
             logger.info(f"Created new message: {subject} - {event_date}")
 
-        # Create BrevoEmail with sent_at from this 'sent' event
+        # Determine initial status and sent_at based on event type
+        if is_delivered_event:
+            # If we're creating from 'delivered', it means we missed the 'sent' event
+            # Use delivered timestamp as sent_at (close enough approximation)
+            initial_status = 'delivered'
+            initial_events = [
+                {
+                    'type': 'sent',
+                    'timestamp': event_datetime.isoformat(),
+                    'inferred': True,  # Mark that this was inferred from delivered
+                }
+            ]
+            logger.info(
+                f"Creating email from 'delivered' event (missed 'sent'): "
+                f"{message_id} to {email_address} from {sender}"
+            )
+        else:
+            # Normal 'sent' event
+            initial_status = 'sent'
+            initial_events = []
+
+        # Create BrevoEmail
         email = BrevoEmail.objects.create(
             brevo_message_id=message_id,
             message=message,
             sender_email=sender if sender else None,
             recipient_email=email_address,
             sent_at=event_datetime,
-            current_status='sent',
-            events=[]
+            current_status=initial_status,
+            events=initial_events
         )
         logger.info(f"Created new email: {message_id} to {email_address} from {sender}")
 
