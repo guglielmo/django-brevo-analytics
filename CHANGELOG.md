@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-03-26
+
+### Fixed
+
+- **Cumulative Status Filter in Frontend Email List**: Fixed `filterEmails()` in `app.js` to use the `STATUS_IMPLIES` hierarchy instead of an exact `current_status` comparison. Emails with status "opened" or "clicked" are now correctly shown when filtering by "Delivered", mirroring the same hierarchy already applied in `update_stats()`.
+
 ## [0.7.3] - 2026-03-26
 
 ### Fixed
