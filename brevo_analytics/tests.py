@@ -722,3 +722,99 @@ class AllowedSenderMatchingTestCase(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['reason'], 'unauthorized_sender')
+
+
+class StatusFilterApiTestCase(TestCase):
+    """Tests for cumulative status filter in message_emails_api"""
+
+    def setUp(self):
+        self.message = BrevoMessage.objects.create(
+            subject="Test Campaign",
+            sent_date=timezone.now().date()
+        )
+        self.email_delivered = BrevoEmail.objects.create(
+            message=self.message,
+            brevo_message_id="<msg-delivered@test.com>",
+            recipient_email="delivered@test.com",
+            sent_at=timezone.now(),
+            current_status='delivered',
+        )
+        self.email_opened = BrevoEmail.objects.create(
+            message=self.message,
+            brevo_message_id="<msg-opened@test.com>",
+            recipient_email="opened@test.com",
+            sent_at=timezone.now(),
+            current_status='opened',
+        )
+        self.email_clicked = BrevoEmail.objects.create(
+            message=self.message,
+            brevo_message_id="<msg-clicked@test.com>",
+            recipient_email="clicked@test.com",
+            sent_at=timezone.now(),
+            current_status='clicked',
+        )
+        self.email_bounced = BrevoEmail.objects.create(
+            message=self.message,
+            brevo_message_id="<msg-bounced@test.com>",
+            recipient_email="bounced@test.com",
+            sent_at=timezone.now(),
+            current_status='bounced',
+        )
+        from django.contrib.auth.models import User
+        self.admin = User.objects.create_superuser('admin', 'admin@test.com', 'password')
+        self.client.login(username='admin', password='password')
+
+    def test_filter_delivered_includes_opened_and_clicked(self):
+        """Clicking 'Delivered' counter must include opened and clicked emails too"""
+        response = self.client.get(
+            f'/brevo-analytics/api/messages/{self.message.id}/emails/?status=delivered'
+        )
+        self.assertEqual(response.status_code, 200)
+        emails = response.json()['emails']
+        recipients = {e['recipient_email'] for e in emails}
+        self.assertIn('delivered@test.com', recipients)
+        self.assertIn('opened@test.com', recipients)
+        self.assertIn('clicked@test.com', recipients)
+        self.assertNotIn('bounced@test.com', recipients)
+
+    def test_filter_opened_includes_clicked(self):
+        """Clicking 'Opened' counter must include clicked emails too"""
+        response = self.client.get(
+            f'/brevo-analytics/api/messages/{self.message.id}/emails/?status=opened'
+        )
+        self.assertEqual(response.status_code, 200)
+        emails = response.json()['emails']
+        recipients = {e['recipient_email'] for e in emails}
+        self.assertIn('opened@test.com', recipients)
+        self.assertIn('clicked@test.com', recipients)
+        self.assertNotIn('delivered@test.com', recipients)
+        self.assertNotIn('bounced@test.com', recipients)
+
+    def test_filter_clicked_exact(self):
+        """Clicking 'Clicked' counter shows only clicked emails"""
+        response = self.client.get(
+            f'/brevo-analytics/api/messages/{self.message.id}/emails/?status=clicked'
+        )
+        self.assertEqual(response.status_code, 200)
+        emails = response.json()['emails']
+        recipients = {e['recipient_email'] for e in emails}
+        self.assertEqual(recipients, {'clicked@test.com'})
+
+    def test_filter_bounced_exact(self):
+        """Bounced filter shows only bounced emails"""
+        response = self.client.get(
+            f'/brevo-analytics/api/messages/{self.message.id}/emails/?status=bounced'
+        )
+        self.assertEqual(response.status_code, 200)
+        emails = response.json()['emails']
+        recipients = {e['recipient_email'] for e in emails}
+        self.assertEqual(recipients, {'bounced@test.com'})
+
+    def test_no_filter_returns_all(self):
+        """Without status filter, all emails are returned"""
+        response = self.client.get(
+            f'/brevo-analytics/api/messages/{self.message.id}/emails/'
+        )
+        self.assertEqual(response.status_code, 200)
+        emails = response.json()['emails']
+        self.assertEqual(len(emails), 4)
