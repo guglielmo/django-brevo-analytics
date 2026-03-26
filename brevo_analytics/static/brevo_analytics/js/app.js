@@ -687,10 +687,22 @@ const MessageEmails = {
     const filterEmails = () => {
       let filtered = emails.value
 
-      // Apply status filter
-      // Note: 'sent' shows all emails since all emails have been sent
+      // Apply status filter with cumulative hierarchy:
+      // a "clicked" email has also been opened and delivered — filtering by
+      // "delivered" must include it.
+      // Note: 'sent' shows all emails since all emails have been sent.
+      const STATUS_IMPLIES = {
+        'delivered': ['delivered', 'opened', 'clicked'],
+        'opened': ['opened', 'clicked'],
+        'clicked': ['clicked'],
+        'bounced': ['bounced'],
+        'blocked': ['blocked'],
+        'deferred': ['deferred'],
+        'unsubscribed': ['unsubscribed'],
+      }
       if (activeFilter.value && activeFilter.value !== 'sent') {
-        filtered = filtered.filter(e => e.current_status === activeFilter.value)
+        const statuses = STATUS_IMPLIES[activeFilter.value] || [activeFilter.value]
+        filtered = filtered.filter(e => statuses.includes(e.current_status))
       }
 
       // Apply search
