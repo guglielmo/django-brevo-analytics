@@ -102,10 +102,23 @@ def message_emails_api(request, message_id):
 
     emails = message.emails.all()
 
-    # Filtro per status se presente query param
+    # Filtro per status se presente query param.
+    # Il filtro è cumulativo: stati "superiori" nella gerarchia implicano quelli inferiori.
+    # Es. "delivered" include anche "opened" e "clicked" (che per definizione sono stati consegnati).
+    STATUS_IMPLIES = {
+        'delivered': ['delivered', 'opened', 'clicked'],
+        'opened': ['opened', 'clicked'],
+        'clicked': ['clicked'],
+        'bounced': ['bounced'],
+        'blocked': ['blocked'],
+        'deferred': ['deferred'],
+        'unsubscribed': ['unsubscribed'],
+        'sent': ['sent', 'delivered', 'opened', 'clicked', 'bounced', 'blocked', 'deferred', 'unsubscribed'],
+    }
     status_filter = request.GET.get('status')
     if status_filter:
-        emails = emails.filter(current_status=status_filter)
+        statuses = STATUS_IMPLIES.get(status_filter, [status_filter])
+        emails = emails.filter(current_status__in=statuses)
 
     message_data = BrevoMessageSerializer(message).data
     emails_data = BrevoEmailListSerializer(emails, many=True).data
