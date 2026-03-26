@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-03-26
+
+### Fixed
+
+- **Cumulative Status Filter**: Fixed status filter in `message_emails_api` so that clicking a status counter (e.g. "Delivered") now returns all emails at that status or higher in the event hierarchy. Previously an exact match was used, causing the counter and the filtered list to disagree. 5 new tests added.
+
 ## [0.7.2] - 2026-03-17
 
 ### Fixed
