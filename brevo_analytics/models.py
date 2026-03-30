@@ -8,11 +8,19 @@ from .sender_utils import get_allowed_senders, build_sender_filter_q
 
 class BrevoMessage(models.Model):
     """
-    Messaggio/Campagna identificato da Subject + Data invio.
-    Raggruppa tutte le email inviate con quel subject in quella data.
+    Messaggio/Campagna che raggruppa tutte le email di uno stesso invio.
+
+    Raggruppamento:
+    - Se MESSAGE_GROUP_BY='tag': usa group_key (es. 'digest:747') + sent_date.
+      Il subject viene aggiornato ad ogni email con l'ultimo titolo dal tag.
+    - Se MESSAGE_GROUP_BY='subject' (default): usa subject + sent_date.
     """
-    # Identificazione univoca: subject + sent_date
     subject = models.TextField()
+    group_key = models.CharField(
+        max_length=255, null=True, blank=True, db_index=True,
+        help_text="Chiave stabile di raggruppamento (es. 'digest:747'). "
+                  "Se presente, il lookup usa group_key+sent_date invece di subject+sent_date."
+    )
     sent_date = models.DateField(db_index=True)
     sent_at = models.DateTimeField(null=True, blank=True, db_index=True,
                                     help_text="Timestamp del primo messaggio inviato")
@@ -38,11 +46,17 @@ class BrevoMessage(models.Model):
         ordering = ['-sent_at', '-sent_date', 'subject']
         constraints = [
             models.UniqueConstraint(fields=['subject', 'sent_date'], name='unique_brevo_message_subject_date'),
+            models.UniqueConstraint(
+                fields=['group_key', 'sent_date'],
+                condition=models.Q(group_key__isnull=False),
+                name='unique_brevo_message_group_key_date',
+            ),
         ]
         indexes = [
             models.Index(fields=['-sent_at']),
             models.Index(fields=['-sent_date']),
             models.Index(fields=['subject', 'sent_date']),
+            models.Index(fields=['group_key', 'sent_date']),
         ]
         verbose_name = _('Message Analysis')
         verbose_name_plural = _('Message Analysis')

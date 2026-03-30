@@ -270,31 +270,50 @@ class Command(BaseCommand):
                     # Build tags list from CSV tag column
                     tags = [tag] if tag else []
 
-                    # Determine grouping subject
+                    # Determine grouping
                     group_subject = subject  # default: use email subject
+                    group_key = None
                     if brevo_config.get('MESSAGE_GROUP_BY') == 'tag' and tags:
                         prefix = brevo_config.get('MESSAGE_TAG_PREFIX', 'digest')
                         tag_prefix = f"{prefix}:"
                         group_tag = next((t for t in tags if t.startswith(tag_prefix)), None)
                         if group_tag:
-                            # Tag format: prefix:id:subject — extract just the subject
                             remainder = group_tag[len(tag_prefix):]
                             colon_pos = remainder.find(':')
                             if colon_pos >= 0:
+                                group_id = remainder[:colon_pos]
                                 group_subject = remainder[colon_pos + 1:]
                             else:
+                                group_id = remainder
                                 group_subject = remainder
+                            group_key = f"{prefix}:{group_id}"
 
                     # Get or create BrevoMessage
-                    message_key = (group_subject, sent_date)
-                    if message_key not in messages_dict:
-                        message, _ = BrevoMessage.objects.get_or_create(
-                            subject=group_subject,
-                            sent_date=sent_date
-                        )
-                        messages_dict[message_key] = message
+                    if group_key:
+                        message_key = (group_key, sent_date)
+                        if message_key not in messages_dict:
+                            message, created = BrevoMessage.objects.get_or_create(
+                                group_key=group_key,
+                                sent_date=sent_date,
+                                defaults={'subject': group_subject}
+                            )
+                            messages_dict[message_key] = message
+                        else:
+                            message = messages_dict[message_key]
+                        # Aggiorna il subject all'ultimo titolo
+                        if message.subject != group_subject:
+                            message.subject = group_subject
+                            message.save(update_fields=['subject', 'updated_at'])
                     else:
-                        message = messages_dict[message_key]
+                        message_key = (group_subject, sent_date)
+                        if message_key not in messages_dict:
+                            message, _ = BrevoMessage.objects.get_or_create(
+                                subject=group_subject,
+                                sent_date=sent_date
+                            )
+                            messages_dict[message_key] = message
+                        else:
+                            message = messages_dict[message_key]
 
                     # Map events
                     events_list = []
