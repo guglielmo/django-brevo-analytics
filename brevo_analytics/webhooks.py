@@ -171,30 +171,51 @@ def brevo_webhook(request):
 
     # 3. If this is a 'sent' or 'delivered' event and email doesn't exist, create it
     if email is None and is_creation_event:
-        # Determine grouping subject based on configuration
+        # Determine grouping based on configuration
         group_subject = subject  # default: use email subject
+        group_key = None
 
         if config.get('MESSAGE_GROUP_BY') == 'tag' and tags:
             prefix = config.get('MESSAGE_TAG_PREFIX', 'digest')
             tag_prefix = f"{prefix}:"
             group_tag = next((t for t in tags if t.startswith(tag_prefix)), None)
             if group_tag:
-                # Tag format: prefix:id:subject — extract just the subject
+                # Tag format: prefix:id:subject — extract id and subject
                 remainder = group_tag[len(tag_prefix):]
                 colon_pos = remainder.find(':')
                 if colon_pos >= 0:
+                    group_id = remainder[:colon_pos]
                     group_subject = remainder[colon_pos + 1:]
                 else:
+                    group_id = remainder
                     group_subject = remainder
+                # Chiave stabile: prefix:id (es. 'digest:747')
+                group_key = f"{prefix}:{group_id}"
 
-        # Get or create BrevoMessage (identified by group_subject + sent_date)
-        message, message_created = BrevoMessage.objects.get_or_create(
-            subject=group_subject,
-            sent_date=event_date,
-            defaults={
-                'total_sent': 0,
-            }
-        )
+        # Get or create BrevoMessage
+        if group_key:
+            # Raggruppamento per group_key: stabile anche se il titolo cambia
+            message, message_created = BrevoMessage.objects.get_or_create(
+                group_key=group_key,
+                sent_date=event_date,
+                defaults={
+                    'subject': group_subject,
+                    'total_sent': 0,
+                }
+            )
+            # Aggiorna il subject all'ultimo titolo ricevuto
+            if not message_created and message.subject != group_subject:
+                message.subject = group_subject
+                message.save(update_fields=['subject', 'updated_at'])
+        else:
+            # Raggruppamento per subject (default, backward compatible)
+            message, message_created = BrevoMessage.objects.get_or_create(
+                subject=group_subject,
+                sent_date=event_date,
+                defaults={
+                    'total_sent': 0,
+                }
+            )
 
         if message_created:
             logger.info(f"Created new message: {group_subject} - {event_date}")
