@@ -247,6 +247,7 @@ class WebhookTagTestCase(TestCase):
             recipient_email='client1@example.com'
         )
         self.assertEqual(email.message.subject, 'Esito CDM 2024-09-17')
+        self.assertEqual(email.message.group_key, 'digest:42')
 
     @override_settings(BREVO_ANALYTICS={
         'ALLOWED_SENDERS': ['noreply@example.com'],
@@ -270,9 +271,11 @@ class WebhookTagTestCase(TestCase):
             }
             self._post_webhook(payload)
 
-        messages = BrevoMessage.objects.filter(subject='Esito CDM 2024-09-17')
+        messages = BrevoMessage.objects.filter(group_key='digest:42')
         self.assertEqual(messages.count(), 1)
-        self.assertEqual(messages.first().emails.count(), 3)
+        msg = messages.first()
+        self.assertEqual(msg.subject, 'Esito CDM 2024-09-17')
+        self.assertEqual(msg.emails.count(), 3)
 
     @override_settings(BREVO_ANALYTICS={
         'ALLOWED_SENDERS': ['noreply@example.com'],
@@ -299,6 +302,7 @@ class WebhookTagTestCase(TestCase):
             recipient_email='nontag@example.com'
         )
         self.assertEqual(email.message.subject, 'Password reset')
+        self.assertIsNone(email.message.group_key)
 
     @override_settings(BREVO_ANALYTICS={
         'ALLOWED_SENDERS': ['noreply@example.com'],
@@ -323,6 +327,7 @@ class WebhookTagTestCase(TestCase):
             recipient_email='default@example.com'
         )
         self.assertEqual(email.message.subject, 'Esito CDM 2024-09-17 - Acme Corp')
+        self.assertIsNone(email.message.group_key)
 
     @override_settings(BREVO_ANALYTICS={
         'ALLOWED_SENDERS': ['noreply@example.com'],
@@ -376,6 +381,48 @@ class WebhookTagTestCase(TestCase):
         )
         # No colon after prefix removal → uses the remainder as-is
         self.assertEqual(email.message.subject, 'Standalone title')
+
+    @override_settings(BREVO_ANALYTICS={
+        'ALLOWED_SENDERS': ['noreply@example.com'],
+        'EXCLUDED_RECIPIENT_DOMAINS': [],
+        'MESSAGE_GROUP_BY': 'tag',
+        'MESSAGE_TAG_PREFIX': 'digest',
+    })
+    def test_webhook_tag_grouping_subject_changes_between_sends(self):
+        """Same digest ID with different titles should share one BrevoMessage with updated subject"""
+        ts = int(time.time())
+
+        # Primo invio: titolo originale
+        payload1 = {
+            'event': 'request',
+            'message-id': '<title-change-001@example.com>',
+            'email': 'client1@example.com',
+            'subject': 'Esito CdM n.166 | DL FISCALE - Acme',
+            'ts_event': ts,
+            'sender': 'noreply@example.com',
+            'tags': ['digest:747:Esito CdM n.166 | DL FISCALE', 'customer:1:Acme'],
+        }
+        self._post_webhook(payload1)
+
+        # Editor modifica title_for_email, secondo invio con titolo diverso
+        payload2 = {
+            'event': 'request',
+            'message-id': '<title-change-002@example.com>',
+            'email': 'client2@example.com',
+            'subject': 'Esito CdM | Venerdì 27 marzo 2026 - Beta',
+            'ts_event': ts,
+            'sender': 'noreply@example.com',
+            'tags': ['digest:747:Esito CdM | Venerdì 27 marzo 2026', 'customer:2:Beta'],
+        }
+        self._post_webhook(payload2)
+
+        # Devono essere raggruppati in un solo BrevoMessage
+        messages = BrevoMessage.objects.filter(group_key='digest:747')
+        self.assertEqual(messages.count(), 1)
+        msg = messages.first()
+        # Subject aggiornato all'ultimo titolo ricevuto
+        self.assertEqual(msg.subject, 'Esito CdM | Venerdì 27 marzo 2026')
+        self.assertEqual(msg.emails.count(), 2)
 
 
 class DisplaySubjectTestCase(TestCase):
