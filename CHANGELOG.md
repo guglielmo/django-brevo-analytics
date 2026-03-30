@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-03-30
+
+### Added
+
+- **group_key Field for Stable Tag-Based Message Grouping**: Added `group_key` CharField (nullable) to `BrevoMessage` model for reliable tag-based message deduplication
+  - When `MESSAGE_GROUP_BY='tag'`, the webhook handler and `import_brevo_logs` command now extract a stable tag prefix+id (e.g. `'digest:747'`) as `group_key`
+  - `get_or_create` now uses `group_key` instead of subject+sent_date when in tag-based grouping mode, ensuring the same campaign is never duplicated across imports or webhook events
+  - The `subject` field continues to be updated to the latest title received, so the dashboard always reflects the current campaign name
+  - New migration `0008` adds the `group_key` field, a database index, and a conditional unique constraint on `(group_key, sent_date)`
+  - Fully backward compatible: `group_key` is nullable and existing behavior is unchanged when `MESSAGE_GROUP_BY` is not `'tag'`
+
 ## [0.7.4] - 2026-03-26
 
 ### Fixed
