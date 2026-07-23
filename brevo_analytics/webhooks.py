@@ -12,6 +12,19 @@ from .sender_utils import get_allowed_senders, is_sender_allowed
 logger = logging.getLogger(__name__)
 
 
+def _canonical_recipient(address):
+    """
+    Canonical form of an email address for conservative matching:
+    lowercase, with any '+extension' stripped from the local part.
+    Some receiving servers (e.g. Google Workspace) report the recipient
+    without the '+tag' extension in delivery events.
+    """
+    local, sep, domain = address.lower().rpartition('@')
+    if not sep:
+        return address.lower()
+    return f"{local.split('+', 1)[0]}@{domain}"
+
+
 @csrf_exempt
 @require_POST
 def brevo_webhook(request):
@@ -148,6 +161,7 @@ def brevo_webhook(request):
     is_creation_event = is_sent_event or is_delivered_event
 
     # 1. Try to find existing BrevoEmail
+    reported_email = None  # set when the event reports a normalized recipient
     try:
         email = BrevoEmail.objects.select_related('message').get(
             brevo_message_id=message_id,
@@ -159,6 +173,31 @@ def brevo_webhook(request):
     except BrevoEmail.DoesNotExist:
         email = None
         email_created = True
+
+        # Conservative fallback (issue #11): some receiving servers strip the
+        # '+tag' extension from the recipient in later events (e.g. 'delivered'),
+        # so the exact lookup misses. Attach the event to the existing row only
+        # if there is exactly ONE row for this message-id AND both addresses
+        # reduce to the same canonical form — with multiple candidates
+        # (marketing campaigns share the message-id across recipients) or
+        # genuinely different addresses, behavior is unchanged.
+        candidates = list(
+            BrevoEmail.objects.select_related('message')
+            .filter(brevo_message_id=message_id)[:2]
+        )
+        if (
+            len(candidates) == 1
+            and _canonical_recipient(candidates[0].recipient_email)
+            == _canonical_recipient(email_address)
+        ):
+            email = candidates[0]
+            message = email.message
+            email_created = False
+            reported_email = email_address
+            logger.info(
+                f"Matched normalized recipient {email_address} to existing "
+                f"email {email.recipient_email} for {message_id}"
+            )
 
     # 2. If email doesn't exist and this is NOT a 'sent' or 'delivered' event, ignore it
     #    Rationale: 'delivered' proves the email was sent, even if we missed the 'sent' event
@@ -271,6 +310,11 @@ def brevo_webhook(request):
     if event_type in ('unique_opened', 'unique_proxy_open'):
         extra_data['ip'] = payload.get('ip', '')
         extra_data['user_agent'] = payload.get('user_agent', '')
+
+    # Address reported by the event, when it differs from the stored one
+    # (normalized recipient matched via canonical fallback)
+    if reported_email:
+        extra_data['reported_email'] = reported_email
 
     # Store raw payload for debugging
     extra_data['raw'] = payload
