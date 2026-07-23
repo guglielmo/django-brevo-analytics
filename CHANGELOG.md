@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-07-23
+
+### Fixed
+
+- **Duplicate BrevoEmail Rows for Normalized Recipients** (#11, #12): Webhook events with a normalized recipient address (e.g. a Google Workspace "+tag" extension stripped from the local part) failed the exact `(brevo_message_id, recipient_email)` lookup. Since `delivered` is a record-creation event, this generated a second, orphaned `BrevoEmail` row for the same physical mailbox, doubling `total_delivered` and skewing delivery/open rates.
+  - Added a conservative fallback in the webhook row resolution: when the exact lookup fails, the event is attached to the existing row only if there is exactly one candidate for that message-id **and** the two addresses match in canonical form (lowercase, "+extension" stripped from the local part).
+  - The address reported by the event is preserved as `reported_email` in the event's extra data.
+  - The fallback lives in the lookup phase, so non-creation events (e.g. `unique_opened`) with a normalized recipient are now attached instead of being ignored.
+  - Marketing campaign semantics (message-id shared across many recipients) are unchanged.
+  - No changes to models, migrations, or the API. Added 6 tests (`WebhookNormalizedRecipientTestCase`).
+
 ## [0.8.0] - 2026-03-30
 
 ### Added
