@@ -425,6 +425,134 @@ class WebhookTagTestCase(TestCase):
         self.assertEqual(msg.emails.count(), 2)
 
 
+class WebhookNormalizedRecipientTestCase(TestCase):
+    """
+    Tests for issue #11: events reporting a normalized recipient
+    (+tag stripped from the local part) must not create orphan rows.
+    """
+
+    SETTINGS = {
+        'ALLOWED_SENDERS': ['noreply@example.com'],
+        'EXCLUDED_RECIPIENT_DOMAINS': [],
+    }
+
+    def _post_webhook(self, payload):
+        """Helper to post a webhook payload"""
+        return self.client.post(
+            '/brevo-analytics/webhook/',
+            data=json.dumps(payload),
+            content_type='application/json'
+        )
+
+    def _base_payload(self, event, message_id, email, ts=None):
+        return {
+            'event': event,
+            'message-id': message_id,
+            'email': email,
+            'subject': 'Digest quotidiano',
+            'ts_event': ts or int(time.time()),
+            'sender': 'noreply@example.com',
+        }
+
+    @override_settings(BREVO_ANALYTICS=SETTINGS)
+    def test_delivered_with_stripped_plus_tag_attaches_to_existing_row(self):
+        """A 'delivered' event with the +tag stripped must attach to the
+        single existing row with the same message-id, not create an orphan."""
+        ts = int(time.time())
+        msg_id = '<norm-001@smtp-relay.mailin.fr>'
+
+        self._post_webhook(self._base_payload('request', msg_id, 'user+tag@example.com', ts))
+        self._post_webhook(self._base_payload('delivered', msg_id, 'user@example.com', ts + 60))
+
+        emails = BrevoEmail.objects.filter(brevo_message_id=msg_id)
+        self.assertEqual(emails.count(), 1)
+
+        email = emails.first()
+        # The original (full) address is kept
+        self.assertEqual(email.recipient_email, 'user+tag@example.com')
+        self.assertEqual(email.current_status, 'delivered')
+
+        # The address reported by the event is stored in the event extra data
+        delivered_events = [e for e in email.events if e['type'] == 'delivered']
+        self.assertEqual(len(delivered_events), 1)
+        self.assertEqual(delivered_events[0].get('reported_email'), 'user@example.com')
+
+        # Stats count a single recipient
+        message = email.message
+        self.assertEqual(message.total_sent, 1)
+        self.assertEqual(message.total_delivered, 1)
+
+    @override_settings(BREVO_ANALYTICS=SETTINGS)
+    def test_non_creation_event_with_stripped_plus_tag_attaches(self):
+        """A non-creation event (unique_opened) with normalized recipient
+        must attach to the existing row instead of being ignored."""
+        ts = int(time.time())
+        msg_id = '<norm-002@smtp-relay.mailin.fr>'
+
+        self._post_webhook(self._base_payload('request', msg_id, 'user+tag@example.com', ts))
+        self._post_webhook(self._base_payload('unique_opened', msg_id, 'user@example.com', ts + 120))
+
+        emails = BrevoEmail.objects.filter(brevo_message_id=msg_id)
+        self.assertEqual(emails.count(), 1)
+        self.assertEqual(emails.first().current_status, 'opened')
+
+    @override_settings(BREVO_ANALYTICS=SETTINGS)
+    def test_ambiguous_candidates_create_row_as_before(self):
+        """With multiple rows sharing the same message-id (marketing
+        campaign semantics), behavior is unchanged: a new row is created."""
+        ts = int(time.time())
+        msg_id = '<norm-003@smtp-relay.mailin.fr>'
+
+        self._post_webhook(self._base_payload('request', msg_id, 'user+tag@example.com', ts))
+        self._post_webhook(self._base_payload('request', msg_id, 'other@example.com', ts))
+        self._post_webhook(self._base_payload('delivered', msg_id, 'user@example.com', ts + 60))
+
+        emails = BrevoEmail.objects.filter(brevo_message_id=msg_id)
+        self.assertEqual(emails.count(), 3)
+
+    @override_settings(BREVO_ANALYTICS=SETTINGS)
+    def test_different_address_creates_row_as_before(self):
+        """A single candidate whose canonical form differs must not match:
+        a new row is created as today."""
+        ts = int(time.time())
+        msg_id = '<norm-004@smtp-relay.mailin.fr>'
+
+        self._post_webhook(self._base_payload('request', msg_id, 'user+tag@example.com', ts))
+        self._post_webhook(self._base_payload('delivered', msg_id, 'someoneelse@example.com', ts + 60))
+
+        emails = BrevoEmail.objects.filter(brevo_message_id=msg_id)
+        self.assertEqual(emails.count(), 2)
+
+    @override_settings(BREVO_ANALYTICS=SETTINGS)
+    def test_normalization_is_case_insensitive(self):
+        """Canonical comparison must be case-insensitive."""
+        ts = int(time.time())
+        msg_id = '<norm-005@smtp-relay.mailin.fr>'
+
+        self._post_webhook(self._base_payload('request', msg_id, 'User+Tag@Example.com', ts))
+        self._post_webhook(self._base_payload('delivered', msg_id, 'user@example.com', ts + 60))
+
+        emails = BrevoEmail.objects.filter(brevo_message_id=msg_id)
+        self.assertEqual(emails.count(), 1)
+        self.assertEqual(emails.first().current_status, 'delivered')
+
+    @override_settings(BREVO_ANALYTICS=SETTINGS)
+    def test_exact_match_does_not_use_fallback(self):
+        """When the exact (message-id, recipient) lookup hits, the event is
+        attached without any reported_email annotation."""
+        ts = int(time.time())
+        msg_id = '<norm-006@smtp-relay.mailin.fr>'
+
+        self._post_webhook(self._base_payload('request', msg_id, 'user+tag@example.com', ts))
+        self._post_webhook(self._base_payload('delivered', msg_id, 'user+tag@example.com', ts + 60))
+
+        emails = BrevoEmail.objects.filter(brevo_message_id=msg_id)
+        self.assertEqual(emails.count(), 1)
+        delivered_events = [e for e in emails.first().events if e['type'] == 'delivered']
+        self.assertEqual(len(delivered_events), 1)
+        self.assertNotIn('reported_email', delivered_events[0])
+
+
 class DisplaySubjectTestCase(TestCase):
     """Tests for display_subject computed field in serializers"""
 
