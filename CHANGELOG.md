@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-24
+
 ### Added
 
 - **Denormalized Bounce Split + Deferred Counters**: Added `total_bounced_hard`, `total_bounced_soft`, `total_bounced_undetermined`, `total_deferred` `IntegerField`s (default 0) to `BrevoMessage`, populated by `update_stats()` from the bounce classification recorded in each `BrevoEmail`'s event timeline (`bounce_type: hard|soft`, undetermined otherwise) and from `current_status='deferred'`.
@@ -15,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - New migration `0009_brevomessage_bounce_split_deferred` (4 additive `AddField`, default 0).
   - Fully backward compatible: no changes to existing fields, the serializer's `fields`, or `update_stats()`'s existing outputs.
 
-### Upgrade note (X.Y.0)
+### Upgrade note (0.9.0)
 
 Nuovi contatori denormalizzati su `BrevoMessage`: `total_bounced_hard`,
 `total_bounced_soft`, `total_bounced_undetermined`, `total_deferred`
