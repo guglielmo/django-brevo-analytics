@@ -306,6 +306,23 @@ python -m build
 - Verify API key has correct permissions on Brevo
 - Check network connectivity to Brevo API
 
+## Upgrading
+
+### Upgrade note (X.Y.0)
+
+Nuovi contatori denormalizzati su `BrevoMessage`: `total_bounced_hard`,
+`total_bounced_soft`, `total_bounced_undetermined`, `total_deferred`
+(additivi, default 0 — nessuna breaking change).
+
+Dopo l'aggiornamento del pacchetto è **necessario**:
+
+1. `python manage.py migrate brevo_analytics`  — aggiunge le colonne.
+2. `python manage.py recalculate_stats`  — ricalcola le statistiche di TUTTI i
+   messaggi (chiama `update_stats()` su ciascuno) e popola i nuovi contatori sui
+   record storici. Idempotente: ri-eseguirlo produce gli stessi valori. I nuovi
+   invii popolano i contatori automaticamente via webhook, quindi il passo 2 serve
+   solo per lo storico ed è consigliato ma non bloccante.
+
 ## Contributing
 
 Contributions welcome! Please:
