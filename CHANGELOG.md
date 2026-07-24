@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Denormalized Bounce Split + Deferred Counters**: Added `total_bounced_hard`, `total_bounced_soft`, `total_bounced_undetermined`, `total_deferred` `IntegerField`s (default 0) to `BrevoMessage`, populated by `update_stats()` from the bounce classification recorded in each `BrevoEmail`'s event timeline (`bounce_type: hard|soft`, undetermined otherwise) and from `current_status='deferred'`.
+  - Invariant: `total_bounced_hard + total_bounced_soft + total_bounced_undetermined == total_bounced`.
+  - `total_deferred` tracks emails currently in `deferred` status and decreases again once an email progresses past deferral (e.g. to `delivered`).
+  - New migration `0009_brevomessage_bounce_split_deferred` (4 additive `AddField`, default 0).
+  - Fully backward compatible: no changes to existing fields, the serializer's `fields`, or `update_stats()`'s existing outputs.
+
+### Upgrade note (X.Y.0)
+
+Nuovi contatori denormalizzati su `BrevoMessage`: `total_bounced_hard`,
+`total_bounced_soft`, `total_bounced_undetermined`, `total_deferred`
+(additivi, default 0 — nessuna breaking change).
+
+Dopo l'aggiornamento del pacchetto è **necessario**:
+
+1. `python manage.py migrate brevo_analytics`  — aggiunge le colonne.
+2. `python manage.py recalculate_stats`  — ricalcola le statistiche di TUTTI i
+   messaggi (chiama `update_stats()` su ciascuno) e popola i nuovi contatori sui
+   record storici. Idempotente: ri-eseguirlo produce gli stessi valori. I nuovi
+   invii popolano i contatori automaticamente via webhook, quindi il passo 2 serve
+   solo per lo storico ed è consigliato ma non bloccante.
+
 ## [0.8.1] - 2026-07-23
 
 ### Fixed
