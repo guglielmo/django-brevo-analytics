@@ -310,18 +310,19 @@ python -m build
 
 ### Upgrade note (0.9.0)
 
-Nuovi contatori denormalizzati su `BrevoMessage`: `total_bounced_hard`,
+New denormalized counters on `BrevoMessage`: `total_bounced_hard`,
 `total_bounced_soft`, `total_bounced_undetermined`, `total_deferred`
-(additivi, default 0 — nessuna breaking change).
+(additive, default 0 — no breaking changes).
 
-Dopo l'aggiornamento del pacchetto è **necessario**:
+After upgrading the package, you **must**:
 
-1. `python manage.py migrate brevo_analytics`  — aggiunge le colonne.
-2. `python manage.py recalculate_stats`  — ricalcola le statistiche di TUTTI i
-   messaggi (chiama `update_stats()` su ciascuno) e popola i nuovi contatori sui
-   record storici. Idempotente: ri-eseguirlo produce gli stessi valori. I nuovi
-   invii popolano i contatori automaticamente via webhook, quindi il passo 2 serve
-   solo per lo storico ed è consigliato ma non bloccante.
+1. `python manage.py migrate brevo_analytics` — adds the new columns.
+2. `python manage.py recalculate_stats` — recalculates stats for ALL
+   messages (calls `update_stats()` on each one) and populates the new
+   counters on historical records. Idempotent: re-running it produces the
+   same values. New sends populate the counters automatically via webhook,
+   so step 2 is only needed for historical data — recommended but not
+   blocking.
 
 ## Contributing
 
