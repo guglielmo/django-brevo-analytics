@@ -308,7 +308,7 @@ python -m build
 
 ## Upgrading
 
-### Upgrade note (X.Y.0)
+### Upgrade note (0.9.0)
 
 Nuovi contatori denormalizzati su `BrevoMessage`: `total_bounced_hard`,
 `total_bounced_soft`, `total_bounced_undetermined`, `total_deferred`
