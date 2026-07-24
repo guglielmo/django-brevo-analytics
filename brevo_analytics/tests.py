@@ -993,3 +993,37 @@ class StatusFilterApiTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         emails = response.json()['emails']
         self.assertEqual(len(emails), 4)
+
+
+class BounceSplitStatsTestCase(TestCase):
+    def setUp(self):
+        self.msg = BrevoMessage.objects.create(subject="S", sent_date=timezone.now().date())
+
+    def _email(self, addr, status, events):
+        return BrevoEmail.objects.create(
+            message=self.msg, brevo_message_id=f"<{addr}>", recipient_email=addr,
+            sent_at=timezone.now(), current_status=status, events=events,
+        )
+
+    def test_split_hard_soft_undetermined_deferred(self):
+        self._email("h@x.it", "bounced", [{"type": "bounced", "bounce_type": "hard"}])
+        self._email("s@x.it", "bounced", [{"type": "bounced", "bounce_type": "soft"}])
+        self._email("u@x.it", "bounced", [{"type": "bounced"}])          # invalid_email/error
+        self._email("d@x.it", "deferred", [{"type": "deferred"}])
+        self.msg.update_stats()
+        self.msg.refresh_from_db()
+        assert self.msg.total_bounced_hard == 1
+        assert self.msg.total_bounced_soft == 1
+        assert self.msg.total_bounced_undetermined == 1
+        assert self.msg.total_deferred == 1
+        # invariante
+        assert self.msg.total_bounced_hard + self.msg.total_bounced_soft \
+            + self.msg.total_bounced_undetermined == self.msg.total_bounced
+
+    def test_deferred_scende_quando_consegna(self):
+        e = self._email("d@x.it", "deferred", [{"type": "deferred"}])
+        self.msg.update_stats(); self.msg.refresh_from_db()
+        assert self.msg.total_deferred == 1
+        e.current_status = "delivered"; e.events = [{"type": "delivered"}]; e.save()
+        self.msg.update_stats(); self.msg.refresh_from_db()
+        assert self.msg.total_deferred == 0

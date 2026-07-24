@@ -33,6 +33,13 @@ class BrevoMessage(models.Model):
     total_bounced = models.IntegerField(default=0)
     total_blocked = models.IntegerField(default=0)
 
+    # Split dei bounce per il riepilogo permanenti/incerti dei consumatori
+    # (invariante: hard + soft + undetermined == total_bounced).
+    total_bounced_hard = models.IntegerField(default=0)
+    total_bounced_soft = models.IntegerField(default=0)
+    total_bounced_undetermined = models.IntegerField(default=0)  # invalid_email/error
+    total_deferred = models.IntegerField(default=0)
+
     # Rates calcolate
     delivery_rate = models.FloatField(default=0.0)
     open_rate = models.FloatField(default=0.0)
@@ -78,6 +85,10 @@ class BrevoMessage(models.Model):
             self.total_clicked = 0
             self.total_bounced = 0
             self.total_blocked = 0
+            self.total_bounced_hard = 0
+            self.total_bounced_soft = 0
+            self.total_bounced_undetermined = 0
+            self.total_deferred = 0
             self.delivery_rate = 0.0
             self.open_rate = 0.0
             self.click_rate = 0.0
@@ -92,11 +103,21 @@ class BrevoMessage(models.Model):
         # Conta email con evento 'sent' effettivo
         # Dobbiamo verificare nell'array events che ci sia un evento di tipo 'sent'
         sent_count = 0
+        b_hard = b_soft = b_undet = 0
         for email in emails:
-            for event in email.events:
-                if event.get('type') == 'sent':
-                    sent_count += 1
-                    break  # Un solo evento sent per email
+            if any(ev.get('type') == 'sent' for ev in email.events):
+                sent_count += 1
+            if email.current_status == 'bounced':
+                tipo = None
+                for ev in email.events:
+                    if ev.get('type') == 'bounced':
+                        tipo = ev.get('bounce_type') or tipo
+                if tipo == 'hard':
+                    b_hard += 1
+                elif tipo == 'soft':
+                    b_soft += 1
+                else:
+                    b_undet += 1
 
         # Conta per status
         stats = emails.aggregate(
@@ -105,6 +126,7 @@ class BrevoMessage(models.Model):
             clicked=Count('id', filter=Q(current_status='clicked')),
             bounced=Count('id', filter=Q(current_status='bounced')),
             blocked=Count('id', filter=Q(current_status='blocked')),
+            deferred=Count('id', filter=Q(current_status='deferred')),
         )
 
         self.total_sent = sent_count
@@ -113,6 +135,10 @@ class BrevoMessage(models.Model):
         self.total_clicked = stats['clicked']
         self.total_bounced = stats['bounced']
         self.total_blocked = stats['blocked']
+        self.total_bounced_hard = b_hard
+        self.total_bounced_soft = b_soft
+        self.total_bounced_undetermined = b_undet
+        self.total_deferred = stats['deferred']
 
         # Calcola rates
         if self.total_sent > 0:
@@ -123,7 +149,8 @@ class BrevoMessage(models.Model):
 
         self.save(update_fields=[
             'total_sent', 'total_delivered', 'total_opened', 'total_clicked',
-            'total_bounced', 'total_blocked', 'delivery_rate', 'open_rate',
+            'total_bounced', 'total_blocked', 'total_bounced_hard', 'total_bounced_soft',
+            'total_bounced_undetermined', 'total_deferred', 'delivery_rate', 'open_rate',
             'click_rate', 'sent_at', 'updated_at'
         ])
 
