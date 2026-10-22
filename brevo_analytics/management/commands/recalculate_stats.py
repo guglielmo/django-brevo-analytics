@@ -2,6 +2,10 @@
 Recalculate statistics for all BrevoMessage records.
 
 Use this after updating the calculation logic or cleaning data.
+
+With --dirty, recalculates only the messages marked by the webhook when
+BREVO_ANALYTICS['STATS_UPDATE'] = 'deferred' (schedule it with cron as the
+only recalculation, or as a safety net next to STATS_UPDATE_HANDLER).
 """
 
 from django.core.management.base import BaseCommand
@@ -17,6 +21,11 @@ class Command(BaseCommand):
             '--message-id',
             type=int,
             help='Recalculate only for specific message ID'
+        )
+        parser.add_argument(
+            '--dirty',
+            action='store_true',
+            help="Recalculate only messages marked as dirty (STATS_UPDATE='deferred')"
         )
 
     def handle(self, *args, **options):
@@ -42,6 +51,10 @@ class Command(BaseCommand):
             except BrevoMessage.DoesNotExist:
                 self.stderr.write(self.style.ERROR(f"Message with ID {message_id} not found"))
                 return
+        elif options.get('dirty'):
+            messages = BrevoMessage.objects.filter(stats_dirty=True)
+            total = messages.count()
+            self.stdout.write(f"\n📊 Recalculating statistics for {total:,} dirty messages\n")
         else:
             messages = BrevoMessage.objects.all()
             total = messages.count()
@@ -56,7 +69,7 @@ class Command(BaseCommand):
                 self.stdout.write(f"  Processing {i:,}/{len(messages):,}...", ending='\r')
 
             old_total_sent = message.total_sent
-            message.update_stats()
+            message.refresh_stats()
 
             # Show details if single message or if stats changed significantly
             if message_id or abs(old_total_sent - message.total_sent) > 0:

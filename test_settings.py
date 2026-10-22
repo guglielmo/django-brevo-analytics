@@ -1,5 +1,7 @@
 """Minimal Django settings for running brevo_analytics tests standalone."""
 
+import os
+
 SECRET_KEY = 'test-secret-key-for-brevo-analytics'
 
 DATABASES = {
@@ -8,6 +10,20 @@ DATABASES = {
         'NAME': ':memory:',
     }
 }
+
+# PostgreSQL, to exercise the JSON queries SQLite does not support:
+# TEST_DB=postgres PGHOST=localhost PGPORT=5432 PGUSER=... PGPASSWORD=... python runtests.py
+if os.environ.get('TEST_DB') == 'postgres':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.environ.get('PGDATABASE', 'brevo_analytics'),
+            'USER': os.environ.get('PGUSER', 'postgres'),
+            'PASSWORD': os.environ.get('PGPASSWORD', ''),
+            'HOST': os.environ.get('PGHOST', 'localhost'),
+            'PORT': os.environ.get('PGPORT', '5432'),
+        }
+    }
 
 INSTALLED_APPS = [
     'django.contrib.contenttypes',
