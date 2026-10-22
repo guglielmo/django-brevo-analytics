@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Deferred Statistics Update** (#15): new opt-in setting `BREVO_ANALYTICS['STATS_UPDATE'] = 'deferred'`. The webhook no longer recalculates the counters of the whole send on every event: after the transaction commits, `add_event()` sets the new `BrevoMessage.stats_dirty` flag (one `UPDATE`, independent of the number of recipients) and the recalculation runs outside the request.
+  - `STATS_UPDATE_HANDLER`: dotted path of a callable `handler(message_id)`, called after commit only by the event that marks the message dirty, so a burst of events enqueues one job. The package does not depend on any task queue: the README shows handlers for django-rq and Celery. A failing handler is logged and does not fail the webhook.
+  - `brevo_analytics.stats.recalculate_message_stats(message_id)`: the job to enqueue. It clears the flag and recalculates in one transaction holding the message row lock, so jobs on the same send run one after the other and a failed recalculation leaves the flag raised.
+  - `recalculate_stats --dirty`: recalculates only the dirty messages; to be scheduled as the safety net of the handler, or as the only recalculation without a task queue.
+  - New migration `0010_brevomessage_stats_dirty` (one additive `AddField`, default `False`).
+- Test suite can run on PostgreSQL with `TEST_DB=postgres` (see README, Development); the concurrency tests of deferred mode (webhook in a transaction while a job runs, two concurrent jobs) run only there.
+
+### Changed
+
+- **Cheaper synchronous recalculation** (#15): `update_stats()` no longer loads every email of the send with its event timeline. On databases with JSON containment (PostgreSQL, MySQL) the `sent` count is done by the database; elsewhere only the `events` column is read. The bounce split reads only the emails in `bounced` status. Same values as 0.9.0, checked on 126 real messages (36,508 emails); on a simulated send of 5,000 recipients with raw payloads the recalculation per event drops from ~240 ms to ~11 ms on PostgreSQL 16.
+- `update_stats()` saves only its own fields in the zero-emails branch too (it used to save the whole instance).
+
+### Upgrade note (0.10.0)
+
+Default behaviour unchanged (`STATS_UPDATE` defaults to `'sync'`). After upgrading, run
+`python manage.py migrate brevo_analytics` (adds `stats_dirty`); no recalculation is needed.
+To enable deferred mode, follow "Statistics Update Mode" in the README.
+
 ## [0.9.0] - 2026-07-24
 
 ### Added

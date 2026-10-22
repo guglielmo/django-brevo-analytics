@@ -1,9 +1,13 @@
+import logging
 import uuid
-from django.db import models
+from django.db import connections, models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.conf import settings
 from .sender_utils import get_allowed_senders, build_sender_filter_q
+from .stats import get_stats_update_mode
+
+logger = logging.getLogger(__name__)
 
 
 class BrevoMessage(models.Model):
@@ -45,6 +49,12 @@ class BrevoMessage(models.Model):
     open_rate = models.FloatField(default=0.0)
     click_rate = models.FloatField(default=0.0)
 
+    # Solo con STATS_UPDATE='deferred': le statistiche sono da ricalcolare
+    stats_dirty = models.BooleanField(
+        default=False, db_index=True,
+        help_text="Statistiche da ricalcolare (impostato dal webhook con STATS_UPDATE='deferred')."
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -71,6 +81,15 @@ class BrevoMessage(models.Model):
     def __str__(self):
         return f"{self.subject} - {self.sent_date}"
 
+    # Campi scritti da update_stats(): stats_dirty resta fuori, così un ricalcolo
+    # non cancella il flag rialzato da un evento arrivato nel frattempo
+    STATS_UPDATE_FIELDS = [
+        'total_sent', 'total_delivered', 'total_opened', 'total_clicked',
+        'total_bounced', 'total_blocked', 'total_bounced_hard', 'total_bounced_soft',
+        'total_bounced_undetermined', 'total_deferred', 'delivery_rate', 'open_rate',
+        'click_rate', 'sent_at', 'updated_at'
+    ]
+
     def update_stats(self):
         """Ricalcola statistiche dalle email associate"""
         from django.db.models import Count, Q, Min
@@ -93,7 +112,7 @@ class BrevoMessage(models.Model):
             self.open_rate = 0.0
             self.click_rate = 0.0
             self.sent_at = None
-            self.save()
+            self.save(update_fields=self.STATS_UPDATE_FIELDS)
             return
 
         # Calcola sent_at come minimo sent_at delle email
@@ -101,23 +120,30 @@ class BrevoMessage(models.Model):
         self.sent_at = first_sent
 
         # Conta email con evento 'sent' effettivo
-        # Dobbiamo verificare nell'array events che ci sia un evento di tipo 'sent'
-        sent_count = 0
+        # Dobbiamo verificare nell'array events che ci sia un evento di tipo 'sent':
+        # dove il database sa interrogare il JSON (PostgreSQL, MySQL) lo conta lui,
+        # altrove (SQLite) si leggono solo le colonne events, non le righe intere.
+        if connections[emails.db].features.supports_json_field_contains:
+            sent_count = emails.filter(events__contains=[{'type': 'sent'}]).count()
+        else:
+            sent_count = sum(
+                1 for events in emails.values_list('events', flat=True)
+                if any(ev.get('type') == 'sent' for ev in events)
+            )
+
+        # Split dei bounce: si leggono gli eventi delle sole email in stato 'bounced'
         b_hard = b_soft = b_undet = 0
-        for email in emails:
-            if any(ev.get('type') == 'sent' for ev in email.events):
-                sent_count += 1
-            if email.current_status == 'bounced':
-                tipo = None
-                for ev in email.events:
-                    if ev.get('type') == 'bounced':
-                        tipo = ev.get('bounce_type') or tipo
-                if tipo == 'hard':
-                    b_hard += 1
-                elif tipo == 'soft':
-                    b_soft += 1
-                else:
-                    b_undet += 1
+        for events in emails.filter(current_status='bounced').values_list('events', flat=True):
+            tipo = None
+            for ev in events:
+                if ev.get('type') == 'bounced':
+                    tipo = ev.get('bounce_type') or tipo
+            if tipo == 'hard':
+                b_hard += 1
+            elif tipo == 'soft':
+                b_soft += 1
+            else:
+                b_undet += 1
 
         # Conta per status
         stats = emails.aggregate(
@@ -147,12 +173,63 @@ class BrevoMessage(models.Model):
             self.open_rate = round(self.total_opened / self.total_delivered * 100, 2)
             self.click_rate = round(self.total_clicked / self.total_delivered * 100, 2)
 
-        self.save(update_fields=[
-            'total_sent', 'total_delivered', 'total_opened', 'total_clicked',
-            'total_bounced', 'total_blocked', 'total_bounced_hard', 'total_bounced_soft',
-            'total_bounced_undetermined', 'total_deferred', 'delivery_rate', 'open_rate',
-            'click_rate', 'sent_at', 'updated_at'
-        ])
+        self.save(update_fields=self.STATS_UPDATE_FIELDS)
+
+    def mark_stats_dirty(self):
+        """
+        Segna le statistiche come da ricalcolare (STATS_UPDATE='deferred').
+
+        Il flag si alza dopo il commit della transazione che ha salvato
+        l'evento: con ATOMIC_REQUESTS un job partito nel frattempo non può
+        azzerarlo prima di vedere l'evento.
+
+        Solo chi porta stats_dirty da False a True chiama STATS_UPDATE_HANDLER:
+        una raffica di eventi sullo stesso invio accoda un solo ricalcolo,
+        non uno per evento. Il ricalcolo successivo riparte al primo evento
+        arrivato dopo che il job ha azzerato il flag.
+
+        Un handler che fallisce (coda irraggiungibile) non fa fallire il
+        webhook: l'evento è già salvato e il messaggio resta segnato per
+        `recalculate_stats --dirty`.
+        """
+        from .stats import get_stats_update_handler
+
+        handler = get_stats_update_handler()
+        message_id = self.pk
+        db = self._state.db
+
+        def mark():
+            changed = BrevoMessage.objects.using(db).filter(
+                pk=message_id, stats_dirty=False
+            ).update(stats_dirty=True)
+            if changed and handler is not None:
+                try:
+                    handler(message_id)
+                except Exception:
+                    logger.exception(
+                        "STATS_UPDATE_HANDLER failed for message %s: it stays dirty "
+                        "until `recalculate_stats --dirty` runs", message_id
+                    )
+
+        self.stats_dirty = True
+        transaction.on_commit(mark, using=db)
+
+    def refresh_stats(self):
+        """
+        Azzera stats_dirty e ricalcola le statistiche, in una sola transazione.
+
+        L'UPDATE iniziale prende il lock della riga del messaggio fino al commit:
+        due ricalcoli dello stesso messaggio vanno in fila, e l'evento che
+        arriva nel frattempo rialza il flag (accodando un altro ricalcolo)
+        solo dopo il commit di questo. Se il calcolo fallisce la transazione
+        si annulla e il flag resta alzato per `recalculate_stats --dirty`.
+        """
+        db = self._state.db
+        with transaction.atomic(using=db):
+            # Incondizionato: prende il lock anche quando il flag è già basso
+            BrevoMessage.objects.using(db).filter(pk=self.pk).update(stats_dirty=False)
+            self.update_stats()
+        self.stats_dirty = False
 
 
 class BrevoEmailQuerySet(models.QuerySet):
@@ -325,8 +402,12 @@ class BrevoEmail(models.Model):
         # Salva
         self.save(update_fields=['events', 'current_status', 'updated_at'])
 
-        # Aggiorna stats del messaggio
-        self.message.update_stats()
+        # Aggiorna stats del messaggio: subito (default) o segnandolo per un
+        # ricalcolo fuori dalla richiesta (STATS_UPDATE='deferred')
+        if get_stats_update_mode() == 'deferred':
+            self.message.mark_stats_dirty()
+        else:
+            self.message.update_stats()
 
         return True
 

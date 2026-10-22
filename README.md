@@ -144,6 +144,18 @@ python manage.py verify_brevo_stats
 
 Compares local statistics with Brevo API to ensure data accuracy.
 
+### Recalculate Statistics
+
+```bash
+python manage.py recalculate_stats
+```
+
+Recalculates the denormalized counters of every `BrevoMessage`.
+
+Options:
+- `--message-id ID`: Recalculate a single message
+- `--dirty`: Recalculate only the messages marked by the webhook in deferred mode (see [Statistics Update Mode](#statistics-update-mode))
+
 ## Architecture
 
 ### Django-Native Design
@@ -183,6 +195,8 @@ Compares local statistics with Brevo API to ensure data accuracy.
 - `MESSAGE_GROUP_BY`: Grouping strategy — `'subject'` (default) or `'tag'` (see [Tag-Based Message Grouping](#tag-based-message-grouping))
 - `MESSAGE_TAG_PREFIX`: Tag prefix for grouping (default: `'digest'`, only used when `MESSAGE_GROUP_BY = 'tag'`)
 - `CLIENT_UID`: UUID for tracking client (defaults to generated UUID)
+- `STATS_UPDATE`: When message counters are recalculated — `'sync'` (default, inside the webhook request) or `'deferred'` (see [Statistics Update Mode](#statistics-update-mode))
+- `STATS_UPDATE_HANDLER`: Dotted path of a callable that enqueues the recalculation of a message (only used when `STATS_UPDATE = 'deferred'`)
 
 ## Tag-Based Message Grouping
 
@@ -239,6 +253,112 @@ message.send()
 - The `BrevoMessage` model is unchanged — no new fields, constraints, or migrations on that table
 - Tags are always stored on `BrevoEmail` even in subject grouping mode, enabling future analytics
 
+## Statistics Update Mode
+
+Every webhook event changes the counters of its `BrevoMessage` (`total_sent`, `total_delivered`, rates, bounce split…). By default they are recalculated **synchronously**, inside the webhook request: the dashboard is always up to date, but each event recalculates the whole send, so its cost grows with the number of recipients, and the cost of a whole send with their square.
+
+For large sends, switch to **deferred** mode: the webhook only marks the message as dirty and answers at once; the counters are recalculated outside the request, once per burst of events.
+
+### When to Switch
+
+The default is fine for sends of a few hundred recipients. Consider deferred mode when your sends reach thousands of recipients, or when you see any of these during and right after a send:
+
+- webhook latency in the seconds (p90/p99) on `/brevo-analytics/webhook/`;
+- `499` responses (Brevo closed the connection before the answer) or `500`/`502` on the webhook;
+- web workers saturated, slower pages for the rest of the application.
+
+Dropped calls are retried by Brevo a limited number of times, then lost: open, click and bounce rates end up lower than the real ones.
+
+Indicative cost per webhook event, PostgreSQL 16, one send of 5,000 recipients with ~3.4 events each (raw payloads included), no concurrent load:
+
+| | per event |
+|---|---|
+| `sync`, up to 0.9.0 | ~240 ms |
+| `sync`, from 0.10.0 (counts done by the database) | ~11 ms |
+| `deferred` | ~2 ms, independent of the number of recipients |
+
+### Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `STATS_UPDATE` | `'sync'` | `'sync'`: recalculate inside the webhook request. `'deferred'`: mark the message and recalculate later |
+| `STATS_UPDATE_HANDLER` | `None` | Dotted path (or callable) `handler(message_id)`, called after commit when a message becomes dirty. Only used in deferred mode |
+
+### How Deferred Mode Works
+
+1. `add_event()` saves the event and, once the transaction commits, sets `BrevoMessage.stats_dirty = True`: one `UPDATE`, whatever the number of recipients. Raising the flag after the commit keeps events safe with `ATOMIC_REQUESTS` too: a job can never clear the flag before the event it stands for is visible.
+2. Only the event that turns the flag from `False` to `True` calls `STATS_UPDATE_HANDLER`. A burst of events on the same send enqueues **one** recalculation, not one per event.
+3. The job calls `brevo_analytics.stats.recalculate_message_stats(message_id)`, which clears the flag and recalculates in one transaction, holding the lock on the message row. Two jobs on the same send run one after the other; an event committed meanwhile raises the flag again once the job commits, and enqueues a new job. If the recalculation fails, the transaction is rolled back and the flag stays raised.
+4. Until the job runs, dashboard, API and admin show the last calculated counters. Event timelines and statuses of single emails are always current.
+
+If the handler raises (e.g. the queue is unreachable), the error is logged and the webhook still answers `200`: the event is saved and the message stays dirty for the safety net below.
+
+### Enabling Deferred Mode
+
+**1. Apply the migration** (adds `BrevoMessage.stats_dirty`, 0.10.0+):
+
+```bash
+python manage.py migrate brevo_analytics
+```
+
+**2. Write a handler that only enqueues.** It runs inside the webhook request: do not recalculate there, or you are back to the synchronous cost. The package does not depend on any task queue; use the one your project already has.
+
+With [django-rq](https://github.com/rq/django-rq):
+
+```python
+# yourproject/brevo_stats.py
+import django_rq
+from brevo_analytics.stats import recalculate_message_stats
+
+
+def enqueue_brevo_stats(message_id):
+    django_rq.enqueue(recalculate_message_stats, message_id)
+```
+
+To collect more events into one recalculation, delay the job a little — `django_rq.get_queue('default').enqueue_in(timedelta(seconds=30), recalculate_message_stats, message_id)`; RQ runs delayed jobs only on workers started with `--with-scheduler`.
+
+With Celery:
+
+```python
+# yourproject/tasks.py
+from celery import shared_task
+from brevo_analytics.stats import recalculate_message_stats
+
+
+@shared_task
+def recalculate_brevo_stats(message_id):
+    recalculate_message_stats(message_id)
+
+
+def enqueue_brevo_stats(message_id):
+    recalculate_brevo_stats.delay(message_id)
+```
+
+**3. Configure:**
+
+```python
+BREVO_ANALYTICS = {
+    # ... other settings ...
+    'STATS_UPDATE': 'deferred',
+    'STATS_UPDATE_HANDLER': 'yourproject.brevo_stats.enqueue_brevo_stats',
+}
+```
+
+**4. Schedule the safety net** — required, not optional:
+
+```bash
+# crontab: every 5 minutes
+*/5 * * * * cd /path/to/project && python manage.py recalculate_stats --dirty
+```
+
+Since only the first event of a burst enqueues a job, a job that never runs (worker restarted, queue flushed, handler failure) would leave the counters of that send stale. The command recalculates whatever is still dirty; with nothing dirty it costs a couple of queries. rq-scheduler or Celery beat work as well as cron.
+
+**Without a task queue**, skip step 2 and leave `STATS_UPDATE_HANDLER` unset: the webhook only marks messages, and the command of step 4 does all the recalculation. Counters lag by up to the cron interval.
+
+### Switching Back
+
+Remove `STATS_UPDATE` (or set it to `'sync'`), then run `python manage.py recalculate_stats --dirty` once, to recalculate the messages left dirty.
+
 ## Data Flow
 
 ```
@@ -275,7 +395,13 @@ pip install -r requirements.txt
 ### Run Tests
 
 ```bash
-python manage.py test brevo_analytics
+python runtests.py
+```
+
+Runs on SQLite in memory. Some database queries (JSON containment) only run on PostgreSQL or MySQL; to exercise them, point the suite at a PostgreSQL server:
+
+```bash
+TEST_DB=postgres PGHOST=localhost PGPORT=5432 PGUSER=postgres PGPASSWORD=... python runtests.py
 ```
 
 ### Build Package
@@ -307,6 +433,21 @@ python -m build
 - Check network connectivity to Brevo API
 
 ## Upgrading
+
+### Upgrade note (0.10.0)
+
+New field `BrevoMessage.stats_dirty` (additive, default `False`) and new opt-in
+setting `STATS_UPDATE`. The default behaviour does not change: counters are
+still recalculated inside the webhook request, with the same values as before,
+but the counts that used to load every email of the send are now done by the
+database.
+
+After upgrading the package:
+
+1. `python manage.py migrate brevo_analytics` — adds the new column.
+
+No recalculation is needed. If your sends reach thousands of recipients, see
+[Statistics Update Mode](#statistics-update-mode) to enable deferred mode.
 
 ### Upgrade note (0.9.0)
 
