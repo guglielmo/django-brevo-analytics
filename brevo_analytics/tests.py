@@ -1,12 +1,18 @@
 import json
+import threading
 import time
+from unittest import mock, skipUnless
 
-from django.test import TestCase, override_settings
+from django.core.exceptions import ImproperlyConfigured
+from django.db import connection, connections, transaction
+from django.test import TestCase, TransactionTestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from django.core.management import call_command
 from datetime import datetime
 from io import StringIO
 from .models import BrevoMessage, BrevoEmail
+from .stats import recalculate_message_stats
 from .sender_utils import (
     get_allowed_senders,
     is_sender_allowed,
@@ -1027,3 +1033,388 @@ class BounceSplitStatsTestCase(TestCase):
         e.current_status = "delivered"; e.events = [{"type": "delivered"}]; e.save()
         self.msg.update_stats(); self.msg.refresh_from_db()
         assert self.msg.total_deferred == 0
+
+
+# --- Costo del ricalcolo delle statistiche (issue #15) ---------------------
+
+STATS_HANDLER_CALLS = []
+
+
+def _record_stats_handler(message_id):
+    """STATS_UPDATE_HANDLER di prova: registra gli id invece di accodare un job."""
+    STATS_HANDLER_CALLS.append(message_id)
+
+
+def _failing_stats_handler(message_id):
+    """STATS_UPDATE_HANDLER di prova con la coda irraggiungibile."""
+    raise ConnectionError("redis irraggiungibile")
+
+
+DEFERRED = {
+    'STATS_UPDATE': 'deferred',
+    'STATS_UPDATE_HANDLER': 'brevo_analytics.tests._record_stats_handler',
+}
+
+
+def _stats_090(message):
+    """
+    Il calcolo di update_stats() della 0.9.0 per i campi che leggono gli eventi,
+    come riferimento: la versione nuova deve dare gli stessi numeri.
+    """
+    sent = hard = soft = undet = 0
+    for email in message.emails.all():
+        if any(ev.get('type') == 'sent' for ev in email.events):
+            sent += 1
+        if email.current_status == 'bounced':
+            tipo = None
+            for ev in email.events:
+                if ev.get('type') == 'bounced':
+                    tipo = ev.get('bounce_type') or tipo
+            if tipo == 'hard':
+                hard += 1
+            elif tipo == 'soft':
+                soft += 1
+            else:
+                undet += 1
+    return {
+        'total_sent': sent,
+        'total_bounced_hard': hard,
+        'total_bounced_soft': soft,
+        'total_bounced_undetermined': undet,
+    }
+
+
+class StatsEquivalenceTestCase(TestCase):
+    """update_stats() conta nel database ma dà gli stessi numeri della 0.9.0."""
+
+    def setUp(self):
+        self.msg = BrevoMessage.objects.create(subject="Equivalenza", sent_date=timezone.now().date())
+        other = BrevoMessage.objects.create(subject="Altro invio", sent_date=timezone.now().date())
+        cases = [
+            ('delivered', [{'type': 'sent'}, {'type': 'delivered'}]),
+            ('delivered', [{'type': 'sent', 'inferred': True}, {'type': 'delivered'}]),
+            ('delivered', [{'type': 'delivered'}]),                       # senza 'sent'
+            ('sent', []),
+            # 'sent' solo dentro il payload grezzo di un altro evento: non conta
+            ('delivered', [{'type': 'delivered', 'raw': {'type': 'sent', 'event': 'request'}}]),
+            ('opened', [{'timestamp': 'x'}, {'type': 'sent'}, {'type': 'opened'}]),
+            ('bounced', [{'type': 'sent'}, {'type': 'bounced', 'bounce_type': 'hard'}]),
+            ('bounced', [{'type': 'bounced', 'bounce_type': 'soft'}]),
+            ('bounced', [{'type': 'bounced'}]),                           # undetermined
+            ('bounced', [{'type': 'bounced', 'bounce_type': 'soft'},
+                         {'type': 'bounced', 'bounce_type': 'hard'}]),    # vince l'ultimo
+            ('bounced', [{'type': 'bounced', 'bounce_type': 'soft'},
+                         {'type': 'bounced'}]),                           # resta soft
+            ('bounced', [{'type': 'sent'}]),                              # stato senza evento
+            ('delivered', [{'type': 'bounced', 'bounce_type': 'hard'},
+                           {'type': 'delivered'}]),                       # non più bounced
+            ('deferred', [{'type': 'sent'}, {'type': 'deferred'}]),
+        ]
+        for i, (status, events) in enumerate(cases):
+            BrevoEmail.objects.create(
+                message=self.msg, brevo_message_id=f"<eq{i}@x.it>", recipient_email=f"eq{i}@x.it",
+                sent_at=timezone.now(), current_status=status, events=events,
+            )
+        BrevoEmail.objects.create(
+            message=other, brevo_message_id="<other@x.it>", recipient_email="other@x.it",
+            sent_at=timezone.now(), current_status='bounced',
+            events=[{'type': 'sent'}, {'type': 'bounced', 'bounce_type': 'hard'}],
+        )
+
+    def test_same_numbers_as_090(self):
+        expected = _stats_090(self.msg)
+        self.msg.update_stats()
+        self.msg.refresh_from_db()
+        self.assertEqual(
+            {k: getattr(self.msg, k) for k in expected}, expected,
+        )
+        self.assertEqual(expected, {
+            'total_sent': 6, 'total_bounced_hard': 2, 'total_bounced_soft': 2,
+            'total_bounced_undetermined': 2,
+        })
+
+    @skipUnless(connection.features.supports_json_field_contains,
+                "il conteggio nel database serve un backend con JSON contains (PostgreSQL, MySQL)")
+    def test_does_not_load_events_of_every_email(self):
+        """Gli eventi si leggono solo per le email in stato 'bounced'."""
+        with CaptureQueriesContext(connection) as ctx:
+            self.msg.update_stats()
+        table = BrevoEmail._meta.db_table
+        loading_events = [
+            q['sql'] for q in ctx.captured_queries
+            if q['sql'].startswith('SELECT')
+            and f'"{table}"."events"' in q['sql'].split(' FROM ')[0]
+        ]
+        self.assertEqual(len(loading_events), 1, loading_events)
+        self.assertIn('current_status', loading_events[0])
+
+
+class DeferredStatsUpdateTestCase(TestCase):
+    """STATS_UPDATE='deferred': il webhook segna, il ricalcolo avviene fuori."""
+
+    def setUp(self):
+        STATS_HANDLER_CALLS.clear()
+        self.msg = BrevoMessage.objects.create(subject="Invio", sent_date=timezone.now().date())
+
+    def _email(self, i, message=None):
+        return BrevoEmail.objects.create(
+            message=message or self.msg, brevo_message_id=f"<d{i}@x.it>",
+            recipient_email=f"d{i}@x.it", sent_at=timezone.now(),
+            events=[{'type': 'sent', 'timestamp': '2026-10-22T10:00:00+00:00'}],
+        )
+
+    def _add_event_queries(self, n):
+        msg = BrevoMessage.objects.create(subject=f"Invio da {n}", sent_date=timezone.now().date())
+        emails = [self._email(f"{n}-{i}", message=msg) for i in range(n)]
+        email = BrevoEmail.objects.get(pk=emails[0].pk)
+        with CaptureQueriesContext(connection) as ctx:
+            with self.captureOnCommitCallbacks(execute=True):
+                email.add_event('delivered', timezone.now())
+        return ctx.captured_queries
+
+    @override_settings(BREVO_ANALYTICS={
+        'STATS_UPDATE_HANDLER': 'brevo_analytics.tests._record_stats_handler',
+    })
+    def test_default_is_sync(self):
+        """Senza STATS_UPDATE il comportamento è quello di sempre; l'handler non si usa."""
+        email = self._email(1)
+        with self.captureOnCommitCallbacks(execute=True):
+            email.add_event('delivered', timezone.now())
+        self.msg.refresh_from_db()
+        self.assertEqual(self.msg.total_delivered, 1)
+        self.assertFalse(self.msg.stats_dirty)
+        self.assertEqual(STATS_HANDLER_CALLS, [])
+
+    @override_settings(BREVO_ANALYTICS=DEFERRED)
+    def test_add_event_marks_and_calls_handler_once_per_burst(self):
+        e1, e2, e3 = self._email(1), self._email(2), self._email(3)
+        with self.captureOnCommitCallbacks(execute=True):
+            e1.add_event('delivered', timezone.now())
+            e2.add_event('delivered', timezone.now())
+            e1.add_event('unique_opened', timezone.now())
+        self.assertEqual(STATS_HANDLER_CALLS, [self.msg.pk])
+        self.msg.refresh_from_db()
+        self.assertTrue(self.msg.stats_dirty)
+        self.assertEqual(self.msg.total_delivered, 0)  # non ancora ricalcolato
+
+        recalculate_message_stats(self.msg.pk)
+        self.msg.refresh_from_db()
+        self.assertFalse(self.msg.stats_dirty)
+        self.assertEqual(self.msg.total_sent, 3)
+        self.assertEqual(self.msg.total_delivered, 2)
+
+        # il primo evento dopo il ricalcolo ne accoda un altro
+        with self.captureOnCommitCallbacks(execute=True):
+            e3.add_event('delivered', timezone.now())
+        self.assertEqual(STATS_HANDLER_CALLS, [self.msg.pk, self.msg.pk])
+
+    @override_settings(BREVO_ANALYTICS={'STATS_UPDATE': 'deferred'})
+    def test_without_handler_only_marks(self):
+        email = self._email(1)
+        with self.captureOnCommitCallbacks(execute=True):
+            email.add_event('delivered', timezone.now())
+        self.msg.refresh_from_db()
+        self.assertTrue(self.msg.stats_dirty)
+        self.assertEqual(self.msg.total_delivered, 0)
+
+    @override_settings(BREVO_ANALYTICS=DEFERRED)
+    def test_add_event_cost_does_not_grow_with_emails(self):
+        """add_event() non legge le altre email dell'invio: query costanti al crescere di N."""
+        small, large = self._add_event_queries(3), self._add_event_queries(60)
+        self.assertEqual(len(small), len(large))
+        table = BrevoEmail._meta.db_table
+        reads = [q['sql'] for q in large if q['sql'].startswith('SELECT') and f'FROM "{table}"' in q['sql']]
+        self.assertEqual(reads, [])
+
+    @override_settings(BREVO_ANALYTICS={'STATS_UPDATE': 'later'})
+    def test_invalid_mode(self):
+        email = self._email(1)
+        with self.assertRaises(ImproperlyConfigured):
+            email.add_event('delivered', timezone.now())
+
+    @override_settings(BREVO_ANALYTICS={'STATS_UPDATE': 'deferred', 'STATS_UPDATE_HANDLER': 'nowhere.handler'})
+    def test_handler_not_importable(self):
+        email = self._email(1)
+        with self.assertRaises(ImproperlyConfigured):
+            email.add_event('delivered', timezone.now())
+
+    @override_settings(BREVO_ANALYTICS={
+        'STATS_UPDATE': 'deferred',
+        'STATS_UPDATE_HANDLER': 'brevo_analytics.tests._failing_stats_handler',
+    })
+    def test_handler_failure_does_not_break_add_event(self):
+        email = self._email(1)
+        with self.assertLogs('brevo_analytics.models', level='ERROR'):
+            with self.captureOnCommitCallbacks(execute=True):
+                self.assertTrue(email.add_event('delivered', timezone.now()))
+        self.msg.refresh_from_db()
+        self.assertTrue(self.msg.stats_dirty)
+
+    @override_settings(BREVO_ANALYTICS=DEFERRED)
+    def test_event_during_recalculation_enqueues_again(self):
+        """Un evento salvato mentre il job ricalcola rialza il flag e accoda un altro job."""
+        e1, e2 = self._email(1), self._email(2)
+        with self.captureOnCommitCallbacks(execute=True):
+            e1.add_event('delivered', timezone.now())
+        original = BrevoMessage.update_stats
+
+        def update_stats_with_concurrent_event(message):
+            BrevoEmail.objects.get(pk=e2.pk).add_event('delivered', timezone.now())
+            original(message)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            with mock.patch.object(BrevoMessage, 'update_stats', update_stats_with_concurrent_event):
+                recalculate_message_stats(self.msg.pk)
+        self.msg.refresh_from_db()
+        self.assertTrue(self.msg.stats_dirty)
+        self.assertEqual(STATS_HANDLER_CALLS, [self.msg.pk, self.msg.pk])
+
+    def test_refresh_failure_leaves_message_dirty(self):
+        BrevoMessage.objects.filter(pk=self.msg.pk).update(stats_dirty=True)
+        with mock.patch.object(BrevoMessage, 'update_stats', side_effect=RuntimeError("db giù")):
+            with self.assertRaises(RuntimeError):
+                recalculate_message_stats(self.msg.pk)
+        self.msg.refresh_from_db()
+        self.assertTrue(self.msg.stats_dirty)
+
+    def test_recalculate_deleted_message_is_ignored(self):
+        recalculate_message_stats(self.msg.pk + 1000)
+
+    def test_command_dirty_only(self):
+        dirty = self.msg
+        self._email(1)
+        BrevoMessage.objects.filter(pk=dirty.pk).update(stats_dirty=True)
+        clean = BrevoMessage.objects.create(subject="Pulito", sent_date=timezone.now().date(), total_sent=99)
+
+        call_command('recalculate_stats', '--dirty', stdout=StringIO())
+
+        dirty.refresh_from_db()
+        clean.refresh_from_db()
+        self.assertFalse(dirty.stats_dirty)
+        self.assertEqual(dirty.total_sent, 1)
+        self.assertEqual(clean.total_sent, 99)  # non toccato
+
+    def test_full_recalculation_clears_flag(self):
+        BrevoMessage.objects.filter(pk=self.msg.pk).update(stats_dirty=True)
+        call_command('recalculate_stats', stdout=StringIO())
+        self.msg.refresh_from_db()
+        self.assertFalse(self.msg.stats_dirty)
+
+    @override_settings(BREVO_ANALYTICS={
+        **DEFERRED,
+        'ALLOWED_SENDERS': ['noreply@example.com'],
+        'EXCLUDED_RECIPIENT_DOMAINS': [],
+    })
+    def test_webhook_answers_without_recalculating(self):
+        base = {
+            'message-id': '<deferred-001@example.com>',
+            'email': 'recipient@example.com',
+            'subject': 'Newsletter',
+            'sender': 'noreply@example.com',
+        }
+        with self.captureOnCommitCallbacks(execute=True):
+            for event in ('request', 'delivered'):
+                response = self.client.post(
+                    '/brevo-analytics/webhook/',
+                    data=json.dumps({**base, 'event': event, 'ts_event': int(time.time())}),
+                    content_type='application/json',
+                )
+                self.assertEqual(response.status_code, 200)
+        message = BrevoMessage.objects.get(subject='Newsletter')
+        self.assertTrue(message.stats_dirty)
+        self.assertEqual(message.total_delivered, 0)
+        self.assertEqual(STATS_HANDLER_CALLS, [message.pk])
+
+
+@skipUnless(connection.vendor == 'postgresql',
+            "serve un database con transazioni concorrenti vere (TEST_DB=postgres)")
+class DeferredStatsConcurrencyTestCase(TransactionTestCase):
+    """Ordinamenti fra webhook in transazione (ATOMIC_REQUESTS) e job, su connessioni distinte."""
+
+    def setUp(self):
+        STATS_HANDLER_CALLS.clear()
+        self.msg = BrevoMessage.objects.create(subject="Concorrenza", sent_date=timezone.now().date())
+        self.emails = [
+            BrevoEmail.objects.create(
+                message=self.msg, brevo_message_id=f"<c{i}@x.it>", recipient_email=f"c{i}@x.it",
+                sent_at=timezone.now(), events=[{'type': 'sent', 'timestamp': 't0'}],
+            )
+            for i in range(2)
+        ]
+
+    @override_settings(BREVO_ANALYTICS=DEFERRED)
+    def test_job_running_before_event_commit_does_not_lose_it(self):
+        """
+        E1 segna il messaggio e accoda J1; E2 salva il suo evento in una
+        transazione ancora aperta quando J1 ricalcola. Al commit di E2 il
+        messaggio deve tornare da ricalcolare, con un secondo job accodato.
+        """
+        self.emails[0].add_event('delivered', 't1')
+        self.assertEqual(STATS_HANDLER_CALLS, [self.msg.pk])
+
+        saved, may_commit = threading.Event(), threading.Event()
+
+        def atomic_request():
+            try:
+                with transaction.atomic():
+                    BrevoEmail.objects.get(pk=self.emails[1].pk).add_event('delivered', 't2')
+                    saved.set()
+                    may_commit.wait(10)
+            finally:
+                connections.close_all()
+
+        request = threading.Thread(target=atomic_request)
+        request.start()
+        try:
+            self.assertTrue(saved.wait(10))
+            recalculate_message_stats(self.msg.pk)  # J1, con E2 non ancora committato
+        finally:
+            may_commit.set()
+            request.join(10)
+
+        self.msg.refresh_from_db()
+        self.assertEqual(self.msg.total_delivered, 1)  # J1 non ha visto E2
+        self.assertTrue(self.msg.stats_dirty)
+        self.assertEqual(STATS_HANDLER_CALLS, [self.msg.pk, self.msg.pk])
+
+        recalculate_message_stats(self.msg.pk)  # J2
+        self.msg.refresh_from_db()
+        self.assertEqual(self.msg.total_delivered, 2)
+        self.assertFalse(self.msg.stats_dirty)
+
+    @override_settings(BREVO_ANALYTICS=DEFERRED)
+    def test_concurrent_recalculations_run_one_after_the_other(self):
+        """Un secondo ricalcolo attende il primo: nessuno salva numeri più vecchi dell'altro."""
+        in_first, release_first = threading.Event(), threading.Event()
+        original = BrevoMessage.update_stats
+        order = []
+
+        def slow_update_stats(message):
+            if threading.current_thread() is first:
+                in_first.set()
+                release_first.wait(10)
+            original(message)
+            order.append(threading.current_thread().name)
+
+        def job():
+            try:
+                recalculate_message_stats(self.msg.pk)
+            finally:
+                connections.close_all()
+
+        first = threading.Thread(target=job, name='J1')
+        second = threading.Thread(target=job, name='J2')
+        with mock.patch.object(BrevoMessage, 'update_stats', slow_update_stats):
+            try:
+                first.start()
+                self.assertTrue(in_first.wait(10))
+                second.start()
+                second.join(0.5)
+                self.assertTrue(second.is_alive())  # in attesa del lock di J1
+            finally:
+                # anche se il test fallisce: i thread non devono restare con la
+                # connessione aperta, o il database di test non si cancella
+                release_first.set()
+                first.join(10)
+                second.join(10)
+        self.assertEqual(order, ['J1', 'J2'])
