@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cheaper synchronous recalculation** (#15): `update_stats()` no longer loads every email of the send with its event timeline. On databases with JSON containment (PostgreSQL, MySQL) the `sent` count is done by the database; elsewhere only the `events` column is read. The bounce split reads only the emails in `bounced` status. Same values as 0.9.0, checked on 126 real messages (36,508 emails); on a simulated send of 5,000 recipients with raw payloads the recalculation per event drops from ~240 ms to ~11 ms on PostgreSQL 16.
 - `update_stats()` saves only its own fields in the zero-emails branch too (it used to save the whole instance).
 
+### Fixed
+
+- **Clicked URL missing from the email detail** (#17): the webhook stores the link of a click in `url`, the log import in `link`, and the email detail showed only `link`, so live clicks never displayed their URL. The detail now reads either field, which also shows clicks already stored, with no data migration.
+  - The log import now writes `url` too, next to `link`: every click event carries `url`, whatever its source. `link` stays on imported events for code that reads it.
+  - The webhook keeps writing `url`, unchanged: projects already read it.
+- **Clicks on different links in the same second** (#17): `add_event()` treated them as duplicates (same type and timestamp) and kept only the first. For clicks the link is now part of the comparison; a click resent by Brevo, with the same link, is still a duplicate.
+
 ### Upgrade note (0.10.0)
 
 Default behaviour unchanged (`STATS_UPDATE` defaults to `'sync'`). After upgrading, run

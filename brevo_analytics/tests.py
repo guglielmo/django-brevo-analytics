@@ -130,6 +130,86 @@ class BrevoModelsTestCase(TestCase):
         self.assertEqual(email.tags, tags)
 
 
+class ClickUrlTestCase(TestCase):
+    """Link dei click (#17): `url` dal webhook, `link` (e ora anche `url`) dall'import."""
+
+    def setUp(self):
+        self.message = BrevoMessage.objects.create(subject="Click", sent_date=timezone.now().date())
+        self.email = BrevoEmail.objects.create(
+            message=self.message, brevo_message_id="<click@example.com>",
+            recipient_email="click@example.com", sent_at=timezone.now(),
+        )
+
+    def test_clicks_on_different_links_in_the_same_second_are_kept(self):
+        ts = timezone.now()
+        self.assertTrue(self.email.add_event('clicked', ts, url='https://a.example.com'))
+        self.assertTrue(self.email.add_event('clicked', ts, url='https://b.example.com'))
+        self.assertEqual([e['url'] for e in self.email.events], ['https://a.example.com', 'https://b.example.com'])
+
+    def test_click_resent_by_brevo_is_still_a_duplicate(self):
+        ts = timezone.now()
+        self.assertTrue(self.email.add_event('clicked', ts, url='https://a.example.com'))
+        self.assertFalse(self.email.add_event('clicked', ts, url='https://a.example.com'))
+        self.assertEqual(len(self.email.events), 1)
+
+    def test_imported_link_and_webhook_url_are_the_same_click(self):
+        ts = timezone.now()
+        self.email.events = [{'type': 'clicked', 'timestamp': ts.isoformat(), 'link': 'https://a.example.com'}]
+        self.email.save()
+        self.assertFalse(self.email.add_event('clicked', ts, url='https://a.example.com'))
+
+    def test_other_events_in_the_same_second_are_still_duplicates(self):
+        ts = timezone.now()
+        self.assertTrue(self.email.add_event('delivered', ts))
+        self.assertFalse(self.email.add_event('delivered', ts, reported_email='other@example.com'))
+
+    @override_settings(BREVO_ANALYTICS={
+        'ALLOWED_SENDERS': ['noreply@example.com'],
+        'EXCLUDED_RECIPIENT_DOMAINS': [],
+    })
+    def test_webhook_click_keeps_url(self):
+        """Il webhook continua a salvare il link in `url`: lo leggono i progetti che usano il pacchetto."""
+        base = {
+            'message-id': '<webhook-click@example.com>', 'email': 'r@example.com',
+            'subject': 'Newsletter', 'sender': 'noreply@example.com',
+        }
+        for extra in ({'event': 'request'}, {'event': 'click', 'link': 'https://a.example.com'}):
+            response = self.client.post(
+                '/brevo-analytics/webhook/',
+                data=json.dumps({**base, **extra, 'ts_event': int(time.time())}),
+                content_type='application/json',
+            )
+            self.assertEqual(response.status_code, 200)
+        email = BrevoEmail.objects.get(brevo_message_id='<webhook-click@example.com>')
+        click = [e for e in email.events if e['type'] == 'clicked'][0]
+        self.assertEqual(click['url'], 'https://a.example.com')
+
+    @override_settings(BREVO_ANALYTICS={
+        'ALLOWED_SENDERS': ['noreply@example.com'],
+        'EXCLUDED_RECIPIENT_DOMAINS': [],
+    })
+    def test_import_writes_url_and_keeps_link(self):
+        import csv
+        import os
+        import tempfile
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, newline='')
+        writer = csv.DictWriter(f, fieldnames=['st_text', 'ts', 'sub', 'frm', 'email', 'tag', 'mid', 'link'])
+        writer.writeheader()
+        row = {'sub': 'Newsletter', 'frm': 'noreply@example.com', 'email': 'r@example.com',
+               'tag': '', 'mid': '<import-click@example.com>'}
+        writer.writerow({**row, 'st_text': 'Inviata', 'ts': '17-09-2024 10:00:00', 'link': ''})
+        writer.writerow({**row, 'st_text': 'Cliccata', 'ts': '17-09-2024 10:05:00', 'link': 'https://a.example.com'})
+        f.close()
+        try:
+            call_command('import_brevo_logs', f.name, stdout=StringIO())
+        finally:
+            os.unlink(f.name)
+        email = BrevoEmail.objects.get(brevo_message_id='import-click@example.com')
+        click = [e for e in email.events if e['type'] == 'clicked'][0]
+        self.assertEqual(click['url'], 'https://a.example.com')
+        self.assertEqual(click['link'], 'https://a.example.com')
+
+
 class BlacklistOnlyModeTestCase(TestCase):
     """Tests for BLACKLIST_ONLY_MODE configuration flag"""
 
