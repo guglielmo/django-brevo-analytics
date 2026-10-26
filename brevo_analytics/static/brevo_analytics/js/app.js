@@ -179,8 +179,8 @@ const EmailDetailModal = {
                   <div v-if="event.bounce_reason" class="event-detail">
                     <strong>Motivo:</strong> {{ event.bounce_reason }}
                   </div>
-                  <div v-if="event.link && event.link !== 'NA'" class="event-detail">
-                    <strong>URL:</strong> <a :href="event.link" target="_blank">{{ event.link }}</a>
+                  <div v-if="eventUrl(event)" class="event-detail">
+                    <strong>URL:</strong> <a :href="eventUrl(event)" target="_blank">{{ eventUrl(event) }}</a>
                   </div>
                   <div v-if="event.ip" class="event-detail">
                     <strong>IP:</strong> {{ event.ip }}
@@ -223,6 +223,12 @@ const EmailDetailModal = {
         minute: '2-digit',
         second: '2-digit'
       })
+    }
+
+    // Link cliccato: il webhook lo salva in `url`, l'import dai log anche in `link`
+    const eventUrl = (event) => {
+      const url = event.url || event.link
+      return url && url !== 'NA' ? url : ''
     }
 
     const eventLabel = (type) => {
@@ -374,6 +380,7 @@ const EmailDetailModal = {
       formatDate,
       formatDateTime,
       eventLabel,
+      eventUrl,
       formatBlacklistReason,
       formatSenders,
       removeFromBlacklist,

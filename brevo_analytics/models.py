@@ -376,10 +376,17 @@ class BrevoEmail(models.Model):
         else:
             timestamp_str = str(timestamp)
 
-        # Controlla duplicati
+        # Controlla duplicati. Per i click conta anche il link: due click su link
+        # diversi nello stesso secondo sono due eventi, il rinvio di Brevo dello
+        # stesso click no. Il link sta in `url` (webhook) o in `link` (import).
         for event in self.events:
             if (event.get('type') == event_type and
                 event.get('timestamp') == timestamp_str):
+                if event_type == 'clicked' and (
+                    (event.get('url') or event.get('link'))
+                    != (extra_data.get('url') or extra_data.get('link'))
+                ):
+                    continue
                 # Evento già presente, skip
                 return False
 

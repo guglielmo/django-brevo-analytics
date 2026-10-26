@@ -355,10 +355,12 @@ class Command(BaseCommand):
                                 bounce_type = 'hard'
                             event_data['bounce_type'] = bounce_type
 
-                        # Add link if present
+                        # Add link if present: `url` come il webhook, `link` per chi legge
+                        # gli eventi importati con le versioni precedenti
                         link = event_raw.get('link')
                         if link and link != 'NA':
                             event_data['link'] = link
+                            event_data['url'] = link
 
                         events_list.append(event_data)
 
