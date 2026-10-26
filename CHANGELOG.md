@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-26
+
 ### Added
 
 - **Deferred Statistics Update** (#15): new opt-in setting `BREVO_ANALYTICS['STATS_UPDATE'] = 'deferred'`. The webhook no longer recalculates the counters of the whole send on every event: after the transaction commits, `add_event()` sets the new `BrevoMessage.stats_dirty` flag (one `UPDATE`, independent of the number of recipients) and the recalculation runs outside the request.
