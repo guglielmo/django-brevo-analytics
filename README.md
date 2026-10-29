@@ -233,6 +233,39 @@ notice, and a way to withdraw consent to tracking alone while still receiving
 the emails. Brevo's anonymization switch is per account, so it cannot be
 disabled for consenting recipients only.
 
+### Open and Click Rates from Brevo's Statistics API
+
+With anonymous tracking the package has no open/click data for new sends, but
+Brevo still counts them in aggregate. The `fetch_brevo_rates` command reads them
+from Brevo's aggregated statistics API (`/v3/smtp/statistics/aggregatedReport`):
+
+```bash
+python manage.py fetch_brevo_rates --dry-run
+python manage.py fetch_brevo_rates
+```
+
+Requirements and behaviour:
+
+- **One tag per send.** The API filters by a single tag, so every send needs its
+  own tag and the package must group messages by it: `MESSAGE_GROUP_BY = 'tag'`
+  (see [Tag-Based Message Grouping](#tag-based-message-grouping)). Messages
+  grouped by subject cannot be queried and are skipped.
+- **`API_KEY`** must be set.
+- For each tag-grouped message sent in the last `--days` days (default and
+  maximum 90, the API limit), the command asks Brevo for the unique opens and
+  clicks of the tag, from the sending date to today. Brevo also counts
+  recipients the package excludes (internal domains, other senders), so the
+  totals are scaled to the deliveries counted by the package: the rate is
+  Brevo's, the total is consistent with the other columns.
+- Totals are stored as aggregate data (`tracking_totals_frozen`,
+  `tracking_totals_fetched_at`) and shown only above `MIN_AGGREGATE_RECIPIENTS`.
+  The dashboard's global rates are computed on the messages that have them.
+- Opens keep arriving for days after a send: **schedule the command** (hourly
+  or daily) with cron or your task scheduler.
+
+Options: `--days N`, `--message-id ID`, `--dry-run`, `--force` (run with
+`ANONYMOUS_TRACKING = False`, overwriting totals computed from events).
+
 ## Architecture
 
 ### Django-Native Design

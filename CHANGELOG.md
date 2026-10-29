@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Open/click rates from Brevo's statistics API** (#22): new `fetch_brevo_rates` command. With anonymous tracking the package has no open/click data for new sends; the command reads Brevo's aggregate unique opens and clicks for each tag-grouped message of the last 90 days (`/v3/smtp/statistics/aggregatedReport`, one tag per send, `MESSAGE_GROUP_BY = 'tag'`), scales them to the deliveries counted by the package and stores them as aggregate totals. To be scheduled: opens keep arriving for days after a send.
+- `BrevoMessage.tracking_totals_fetched_at`: last update of the totals from Brevo. New migration `0012_brevomessage_tracking_totals_fetched_at` (one additive `AddField`, nullable).
+
+### Changed
+
+- Dashboard: with anonymous tracking the global open/click rates are computed on the messages that have aggregate totals (kept by `anonymize_tracking_data` or fetched from Brevo, above `MIN_AGGREGATE_RECIPIENTS`), instead of being always "n/a".
+
 ## [0.11.0] - 2026-10-29
 
 ### Changed

@@ -1932,3 +1932,114 @@ class AnonymousTrackingApiTestCase(TestCase):
         self.assertEqual(detail['current_status'], 'opened')
         self.assertEqual(detail['events'][2]['ip'], '1.2.3.4')
         self.assertNotIn('raw', detail['events'][0])
+
+
+def _brevo_report(delivered, unique_opens, unique_clicks):
+    """Risposta di /smtp/statistics/aggregatedReport (solo i campi usati)."""
+    response = mock.Mock(status_code=200)
+    response.json.return_value = {
+        'delivered': delivered, 'uniqueOpens': unique_opens, 'uniqueClicks': unique_clicks,
+    }
+    return response
+
+
+RATES = {'API_KEY': 'test-key', 'MESSAGE_GROUP_BY': 'tag', 'MESSAGE_TAG_PREFIX': 'invio'}
+
+
+@override_settings(BREVO_ANALYTICS=RATES)
+class FetchBrevoRatesTestCase(TestCase):
+    """Comando fetch_brevo_rates: tassi aggregati di apertura e clic dall'API di Brevo (#22)."""
+
+    TAG = 'invio:newsletter-7:Monitoraggio del 29 Ottobre'
+
+    def _message(self, delivered, sent_date=None, tag=TAG):
+        sent_date = sent_date or timezone.now().date()
+        msg = BrevoMessage.objects.create(
+            subject="Monitoraggio del 29 Ottobre", group_key='invio:newsletter-7', sent_date=sent_date,
+        )
+        for i in range(delivered):
+            BrevoEmail.objects.create(
+                message=msg, brevo_message_id=f"<r{i}@x.it>", recipient_email=f"r{i}@x.it",
+                sent_at=timezone.now(), current_status='delivered',
+                events=[{'type': 'sent'}, {'type': 'delivered'}], tags=[tag] if tag else [],
+            )
+        msg.update_stats()
+        return msg
+
+    def _run(self, *args, report=None):
+        out = StringIO()
+        with mock.patch('brevo_analytics.brevo_rates.requests.get', return_value=report) as get:
+            call_command('fetch_brevo_rates', *args, stdout=out)
+        return out.getvalue(), get
+
+    def test_stores_aggregate_totals_scaled_to_local_deliveries(self):
+        """Brevo conta anche i destinatari esclusi dal pacchetto: i totali si riportano in proporzione."""
+        msg = self._message(20)
+        _, get = self._run(report=_brevo_report(delivered=40, unique_opens=18, unique_clicks=6))
+        params = get.call_args.kwargs['params']
+        self.assertEqual(params['tag'], self.TAG)
+        self.assertEqual(params['startDate'], msg.sent_date.isoformat())
+        self.assertEqual(get.call_args.kwargs['headers']['api-key'], 'test-key')
+        msg.refresh_from_db()
+        self.assertTrue(msg.tracking_totals_frozen)
+        self.assertIsNotNone(msg.tracking_totals_fetched_at)
+        self.assertEqual((msg.total_opened, msg.total_clicked), (9, 3))
+        self.assertEqual((msg.open_rate, msg.click_rate), (45.0, 15.0))
+
+    def test_end_date_is_capped_at_90_days(self):
+        old = timezone.now().date() - timezone.timedelta(days=100)
+        self._message(10, sent_date=old)
+        _, get = self._run('--days', '120', report=_brevo_report(10, 1, 0))
+        params = get.call_args.kwargs['params']
+        self.assertEqual(params['endDate'], (old + timezone.timedelta(days=89)).isoformat())
+
+    def test_messages_without_tag_are_skipped(self):
+        msg = BrevoMessage.objects.create(subject="Senza tag", sent_date=timezone.now().date())
+        output, get = self._run(report=_brevo_report(10, 5, 1))
+        get.assert_not_called()
+        msg.refresh_from_db()
+        self.assertFalse(msg.tracking_totals_frozen)
+
+    def test_messages_older_than_window_are_skipped(self):
+        self._message(10, sent_date=timezone.now().date() - timezone.timedelta(days=200))
+        _, get = self._run(report=_brevo_report(10, 5, 1))
+        get.assert_not_called()
+
+    def test_api_error_leaves_message_unchanged(self):
+        msg = self._message(10)
+        error = mock.Mock(status_code=400, text='{"code":"invalid_parameter"}')
+        output, _ = self._run(report=error)
+        self.assertIn('1 failed', output)
+        msg.refresh_from_db()
+        self.assertFalse(msg.tracking_totals_frozen)
+
+    def test_dry_run_changes_nothing(self):
+        msg = self._message(10)
+        output, _ = self._run('--dry-run', report=_brevo_report(10, 5, 1))
+        self.assertIn('DRY RUN', output)
+        msg.refresh_from_db()
+        self.assertFalse(msg.tracking_totals_frozen)
+
+    @override_settings(BREVO_ANALYTICS={**RATES, 'API_KEY': ''})
+    def test_requires_api_key(self):
+        output, get = self._run(report=_brevo_report(10, 5, 1))
+        self.assertIn('API_KEY', output)
+        get.assert_not_called()
+
+    @override_settings(BREVO_ANALYTICS={**RATES, 'ANONYMOUS_TRACKING': False})
+    def test_refused_with_per_recipient_tracking(self):
+        output, get = self._run(report=_brevo_report(10, 5, 1))
+        self.assertIn('ANONYMOUS_TRACKING is False', output)
+        get.assert_not_called()
+
+    def test_dashboard_rates_use_messages_with_totals(self):
+        """I riquadri globali si calcolano sui soli messaggi con totali aggregati."""
+        from django.contrib.auth.models import User
+        self._message(20)
+        BrevoMessage.objects.create(subject="Senza dati", sent_date=timezone.now().date(),
+                                    total_sent=30, total_delivered=30)
+        self._run(report=_brevo_report(delivered=20, unique_opens=10, unique_clicks=4))
+        User.objects.create_superuser('admin', 'admin@test.com', 'password')
+        self.client.login(username='admin', password='password')
+        kpi = self.client.get('/brevo-analytics/api/dashboard/').json()['kpi']
+        self.assertEqual((kpi['open_rate'], kpi['click_rate']), (50.0, 20.0))
