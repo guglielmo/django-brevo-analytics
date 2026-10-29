@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-29
+
 ### Changed
 
 - **Anonymous tracking by default** (#20): following the Italian Data Protection Authority's guidelines on tracking pixels in emails (provvedimento n. 284 of 17 April 2026), the package no longer records opens and clicks per recipient. New setting `BREVO_ANALYTICS['ANONYMOUS_TRACKING']`, default `True`; `False` restores the previous behaviour, which requires the recipients' consent.
@@ -16,7 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Sent, delivered, bounce, blocked, deferred, spam and unsubscribe events, and blacklist management, are unchanged.
 - The webhook no longer stores the raw Brevo payload (`raw`) in events, and the email detail API never returns it.
 - Log import: "Caricata per procura" ("Loaded by proxy") is an open via proxy, as Brevo defines it, not a delivery.
-
 - Webhook: event types not in the package's list are ignored (`200`) instead of being stored as they are, so a new Brevo event cannot be stored per recipient by default. `unsubscribe` is mapped to `unsubscribed`.
 
 ### Added
@@ -27,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Asks for confirmation (`--no-input` to skip) and refuses to run with `ANONYMOUS_TRACKING = False` unless `--force`; `--dry-run` to preview.
 - `BrevoMessage.tracking_totals_frozen`: historical open/click totals that `update_stats()` no longer recomputes; open/click rates are still recomputed on current deliveries, and totals never exceed them. New migration `0011_brevomessage_tracking_totals_frozen` (one additive `AddField`, default `False`).
 - Events anonymized by Brevo ("Anonymous email tracking": "Anonymized" message ID or recipient, or open/click events without them) are acknowledged with `200` and ignored for every event type, whatever the setting: no retries from Brevo, no errors in the log, no placeholder emails. Anonymized rows in log imports (for the allowed senders) are excluded, counted, and reported in `--dry-run` too.
+
+### Upgrade note (0.11.0)
+
+**Default behaviour changes**: opens and clicks are no longer recorded per recipient. After upgrading, run
+`python manage.py migrate brevo_analytics` (adds `tracking_totals_frozen`), then
+`python manage.py anonymize_tracking_data --dry-run` and `python manage.py anonymize_tracking_data`
+to remove the per-recipient data already stored, and enable "Anonymous email tracking" in each Brevo account.
+To keep per-recipient tracking (recipients' consent required), set `ANONYMOUS_TRACKING = False` before upgrading.
+See "Anonymous Tracking" and "Upgrade note (0.11.0)" in the README.
 
 ## [0.10.0] - 2026-10-26
 
