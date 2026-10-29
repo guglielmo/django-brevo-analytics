@@ -675,7 +675,9 @@ const MessageEmails = {
         message.value = data.message
         emails.value = data.emails
 
-        if (statusParam) {
+        // Un link salvato con ?status=opened|clicked non filtra senza recipient_tracking
+        const trackingFilter = ['opened', 'clicked'].includes(statusParam)
+        if (statusParam && (message.value.recipient_tracking || !trackingFilter)) {
           setFilter(statusParam)
         } else {
           filteredEmails.value = emails.value

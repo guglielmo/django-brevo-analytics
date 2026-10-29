@@ -22,6 +22,13 @@ TRACKING_EVENT_TYPES = ('opened', 'clicked')
 # Campi degli eventi che identificano il destinatario o il suo comportamento
 TRACKING_FIELDS = ('ip', 'user_agent', 'url', 'link')
 
+# Valori con cui Brevo sostituisce email e message ID anonimizzati (log ed export)
+ANONYMIZED_VALUES = {'anonymized', 'anonymized contact', 'anonymized data'}
+
+# Sotto questo numero di destinatari consegnati un totale "aggregato" di
+# aperture e clic dice chi ha aperto: non si conserva e non si mostra
+DEFAULT_MIN_AGGREGATE_RECIPIENTS = 10
+
 
 def is_anonymous_tracking():
     """Valore di BREVO_ANALYTICS['ANONYMOUS_TRACKING'] (default True)."""
@@ -29,19 +36,35 @@ def is_anonymous_tracking():
     return bool(config.get('ANONYMOUS_TRACKING', True))
 
 
+def get_min_aggregate_recipients():
+    """Valore di BREVO_ANALYTICS['MIN_AGGREGATE_RECIPIENTS'] (default 10)."""
+    config = getattr(settings, 'BREVO_ANALYTICS', {})
+    return int(config.get('MIN_AGGREGATE_RECIPIENTS', DEFAULT_MIN_AGGREGATE_RECIPIENTS))
+
+
 def is_anonymized_value(value):
     """
-    True se un identificativo è assente o anonimizzato da Brevo
-    ("Anonymized", "Anonymized contact", "Anonymized data").
+    True se un identificativo è stato anonimizzato da Brevo ("Anonymized",
+    "Anonymized contact", "Anonymized data", anche tra parentesi angolari).
+    Un indirizzo reale come anonymized.smith@example.com non lo è.
     """
     if not value:
-        return True
-    return str(value).strip().lower().startswith('anonymized')
+        return False
+    return str(value).strip().strip('<>').strip().lower() in ANONYMIZED_VALUES
 
 
 def tracking_totals_available(message):
-    """I totali di apertura e clic del messaggio si possono mostrare."""
-    return not is_anonymous_tracking() or message.tracking_totals_frozen
+    """
+    I totali di apertura e clic del messaggio si possono mostrare: sempre con
+    il tracciamento per destinatario, altrimenti solo i totali storici
+    conservati su abbastanza destinatari da essere davvero aggregati.
+    """
+    if not is_anonymous_tracking():
+        return True
+    return (
+        message.tracking_totals_frozen
+        and message.total_delivered >= get_min_aggregate_recipients()
+    )
 
 
 def public_status(status):

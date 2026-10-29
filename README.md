@@ -168,9 +168,23 @@ Removes the per-recipient open/click data already stored: deletes `opened` and
 addresses, user agents and links from the remaining events. Bounce type and
 reason are kept. See [Anonymous Tracking](#anonymous-tracking).
 
+Open/click totals per message are kept as aggregate data only for messages with
+at least `MIN_AGGREGATE_RECIPIENTS` delivered emails (default 10): below that, a
+total would tell who opened, so it is dropped. Kept totals are a snapshot taken
+the first time a message is cleaned; open/click events stored later (e.g. by an
+import made with `ANONYMOUS_TRACKING = False`) are removed without being added.
+Open and click rates are always recomputed on current deliveries.
+
+Emails are processed in batches of 500, each in its own transaction with the
+rows locked: the webhook can keep running, and an event saved meanwhile is not
+overwritten. The command asks for confirmation and refuses to run when
+`ANONYMOUS_TRACKING = False`.
+
 Options:
 - `--dry-run`: Show what would change without modifying data
-- `--discard-totals`: Do not keep historical open/click totals and rates (by default they are kept as aggregate data)
+- `--discard-totals`: Keep no open/click totals, and discard the ones kept by previous runs
+- `--no-input`: Do not ask for confirmation
+- `--force`: Run even with `ANONYMOUS_TRACKING = False`
 
 ## Anonymous Tracking
 
@@ -189,7 +203,8 @@ rate of a send, with anonymized data.
 - **Log import**: open and click rows are skipped and counted in the output.
 - **Dashboard and API**: open/click totals and rates are shown as not available
   (`null` in the API), except for historical totals kept by
-  `anonymize_tracking_data`. The "opened" and "clicked" filters are disabled;
+  `anonymize_tracking_data` on messages with at least `MIN_AGGREGATE_RECIPIENTS`
+  delivered emails. The "opened" and "clicked" filters are disabled;
   emails previously marked as opened or clicked are shown as delivered, without
   their open/click events.
 - **Unchanged**: sent, delivered, bounced (hard/soft), blocked, deferred, spam,
@@ -198,7 +213,9 @@ rate of a send, with anonymized data.
 
 Events anonymized by Brevo (see below) arrive without a usable message ID or
 recipient: they are always acknowledged with `200` and ignored, whatever the
-setting, so Brevo does not retry them and no error is logged.
+event type and the setting, so Brevo does not retry them, no error is logged and
+no placeholder email is created. Event types the package does not know are
+ignored too, so a new Brevo event cannot be stored per recipient by default.
 
 ### Enabling Anonymous Tracking in Brevo
 
@@ -258,6 +275,7 @@ disabled for consenting recipients only.
 - `STATS_UPDATE`: When message counters are recalculated — `'sync'` (default, inside the webhook request) or `'deferred'` (see [Statistics Update Mode](#statistics-update-mode))
 - `STATS_UPDATE_HANDLER`: Dotted path of a callable that enqueues the recalculation of a message (only used when `STATS_UPDATE = 'deferred'`)
 - `ANONYMOUS_TRACKING`: `True` (default) does not record opens and clicks per recipient; `False` restores per-recipient tracking, which requires consent (see [Anonymous Tracking](#anonymous-tracking))
+- `MIN_AGGREGATE_RECIPIENTS`: Minimum delivered emails for a message's historical open/click totals to be kept and shown with anonymous tracking (default: `10`)
 
 ## Tag-Based Message Grouping
 
@@ -330,7 +348,7 @@ The default is fine for sends of a few hundred recipients. Consider deferred mod
 
 Dropped calls are retried by Brevo a limited number of times, then lost: open, click and bounce rates end up lower than the real ones.
 
-Indicative cost per webhook event, PostgreSQL 16, one send of 5,000 recipients with ~3.4 events each (raw payloads included), no concurrent load:
+Indicative cost per webhook event, PostgreSQL 16, one send of 5,000 recipients with ~3.4 events each (raw payloads included, as stored before 0.11.0: an upper bound now), no concurrent load:
 
 | | per event |
 |---|---|
@@ -506,8 +524,10 @@ After upgrading the package:
 1. `python manage.py migrate brevo_analytics` — adds the new column.
 2. `python manage.py anonymize_tracking_data --dry-run`, then
    `python manage.py anonymize_tracking_data` — removes the per-recipient
-   open/click data already stored. Historical open/click totals per message are
-   kept as aggregate data unless you pass `--discard-totals`.
+   open/click data already stored. Historical open/click totals are kept as
+   aggregate data for messages with at least `MIN_AGGREGATE_RECIPIENTS` (10)
+   delivered emails, unless you pass `--discard-totals`; the webhook can keep
+   running.
 3. Enable "Anonymous email tracking" for transactional emails in each Brevo
    account.
 

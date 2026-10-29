@@ -20,7 +20,7 @@ import time
 from typing import Optional
 from brevo_analytics.models import BrevoMessage, BrevoEmail
 from brevo_analytics.sender_utils import get_allowed_senders, build_sender_sql_clause
-from brevo_analytics.tracking import TRACKING_EVENT_TYPES, is_anonymous_tracking
+from brevo_analytics.tracking import ANONYMIZED_VALUES, TRACKING_EVENT_TYPES, is_anonymous_tracking
 
 
 # Mapping from CSV st_text values to our event types
@@ -103,14 +103,6 @@ class Command(BaseCommand):
             total_rows = conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
             self.stdout.write(f"✓ Loaded {total_rows:,} log entries")
 
-            # Righe anonimizzate da Brevo ("Anonymous email tracking"): non si
-            # collegano a nessun invio, quindi restano fuori dall'import (#20)
-            anonymized_rows = conn.execute("""
-                SELECT COUNT(*) FROM logs
-                WHERE lower(trim(mid)) LIKE 'anonymized%'
-                   OR lower(trim(email)) LIKE 'anonymized%'
-            """).fetchone()[0]
-
             # Clean up message IDs (remove angle brackets)
             conn.execute("""
                 UPDATE logs
@@ -143,6 +135,19 @@ class Command(BaseCommand):
                 excluded_conditions = " AND ".join([f"email NOT LIKE '%@{domain}'" for domain in excluded_domains])
                 excluded_clause = f"AND ({excluded_conditions})"
 
+            # Righe anonimizzate da Brevo ("Anonymous email tracking"): non si
+            # collegano a nessun invio, quindi si escludono (#20). Si contano
+            # solo quelle dei mittenti autorizzati.
+            anonymized_values = ", ".join(f"'{v}'" for v in sorted(ANONYMIZED_VALUES))
+            anonymized_condition = (
+                f"(lower(trim(mid)) IN ({anonymized_values}) "
+                f"OR lower(trim(email)) IN ({anonymized_values}))"
+            )
+            anonymized_rows = conn.execute(f"""
+                SELECT COUNT(*) FROM logs
+                WHERE ({senders_clause}) AND {anonymized_condition}
+            """).fetchone()[0]
+
             conn.execute(f"""
                 CREATE TABLE parsed_logs AS
                 SELECT
@@ -159,6 +164,7 @@ class Command(BaseCommand):
                   AND mid != 'NA'
                   AND email IS NOT NULL
                   AND sub IS NOT NULL
+                  AND NOT {anonymized_condition}
                   AND ({senders_clause})
                   {excluded_clause}
             """)
@@ -208,6 +214,10 @@ class Command(BaseCommand):
             if dry_run:
                 self.stdout.write("\n🔍 DRY RUN - No data imported")
                 self._show_statistics(conn)
+                if is_anonymous_tracking():
+                    self.stdout.write("ℹ️  Open/click events will be skipped (ANONYMOUS_TRACKING)")
+                if anonymized_rows > 0:
+                    self.stdout.write(f"ℹ️  Anonymized log entries skipped: {anonymized_rows:,}")
                 return
 
             # Import into Django with bulk operations

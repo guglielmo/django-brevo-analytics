@@ -17,11 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The webhook no longer stores the raw Brevo payload (`raw`) in events, and the email detail API never returns it.
 - Log import: "Caricata per procura" ("Loaded by proxy") is an open via proxy, as Brevo defines it, not a delivery.
 
+- Webhook: event types not in the package's list are ignored (`200`) instead of being stored as they are, so a new Brevo event cannot be stored per recipient by default. `unsubscribe` is mapped to `unsubscribed`.
+
 ### Added
 
-- `anonymize_tracking_data` command: removes the per-recipient open/click data already stored (open/click events, raw payloads, IP addresses, user agents, links) and recomputes statuses and statistics. Keeps historical open/click totals per message as aggregate data unless `--discard-totals`; `--dry-run` to preview.
-- `BrevoMessage.tracking_totals_frozen`: historical open/click totals that `update_stats()` no longer recomputes. New migration `0011_brevomessage_tracking_totals_frozen` (one additive `AddField`, default `False`).
-- Events anonymized by Brevo ("Anonymous email tracking": missing or "Anonymized" message ID or recipient) are acknowledged with `200` and ignored, whatever the setting: no retries from Brevo, no errors in the log. Anonymized rows in log imports are counted and skipped.
+- `anonymize_tracking_data` command: removes the per-recipient open/click data already stored (open/click events, raw payloads, IP addresses, user agents, links) and recomputes statuses and statistics.
+  - Keeps historical open/click totals as aggregate data only for messages with at least `MIN_AGGREGATE_RECIPIENTS` delivered emails (new setting, default 10): below that a total would tell who opened. Totals are a snapshot of the first run; `--discard-totals` keeps none and discards those kept by previous runs.
+  - Processes emails in batches, each in its own transaction with the rows locked, so the webhook can keep running.
+  - Asks for confirmation (`--no-input` to skip) and refuses to run with `ANONYMOUS_TRACKING = False` unless `--force`; `--dry-run` to preview.
+- `BrevoMessage.tracking_totals_frozen`: historical open/click totals that `update_stats()` no longer recomputes; open/click rates are still recomputed on current deliveries, and totals never exceed them. New migration `0011_brevomessage_tracking_totals_frozen` (one additive `AddField`, default `False`).
+- Events anonymized by Brevo ("Anonymous email tracking": "Anonymized" message ID or recipient, or open/click events without them) are acknowledged with `200` and ignored for every event type, whatever the setting: no retries from Brevo, no errors in the log, no placeholder emails. Anonymized rows in log imports (for the allowed senders) are excluded, counted, and reported in `--dry-run` too.
 
 ## [0.10.0] - 2026-10-26
 

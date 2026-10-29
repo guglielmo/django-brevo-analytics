@@ -13,6 +13,7 @@ Scadenza di adeguamento delle linee guida: 29 ottobre 2026.
 - [x] import da CSV: salta aperture e clic, corregge "Caricata per procura"
 - [x] statistiche e interfaccia: tassi "non disponibile", via filtri per destinatario e IP/user agent
 - [x] test e documentazione (README, CHANGELOG sotto Unreleased)
+- [x] review approfondita: corretti comando di pulizia (a blocchi, conferma, soglia di 10 destinatari per i totali storici), tassi sui totali conservati, eventi anonimizzati e sconosciuti nel webhook
 - [ ] rilascio 0.11.0 (bump di versione, tag, release GitHub)
 - [ ] test della suite su PostgreSQL (`TEST_DB=postgres`): girata solo su SQLite
 - [ ] da verificare: forma degli eventi anonimi al webhook (invio di prova)

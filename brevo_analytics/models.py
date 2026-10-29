@@ -104,7 +104,8 @@ class BrevoMessage(models.Model):
 
         emails = self.emails.all()
         total = emails.count()
-        # Totali storici conservati: aperture e clic non si ricalcolano
+        # Totali storici conservati: i totali di aperture e clic non si
+        # ricalcolano dagli eventi (cancellati), i tassi sì, sulle consegne attuali
         frozen = self.tracking_totals_frozen
 
         if total == 0:
@@ -120,8 +121,8 @@ class BrevoMessage(models.Model):
             if not frozen:
                 self.total_opened = 0
                 self.total_clicked = 0
-                self.open_rate = 0.0
-                self.click_rate = 0.0
+            self.open_rate = 0.0
+            self.click_rate = 0.0
             self.sent_at = None
             self.save(update_fields=self.STATS_UPDATE_FIELDS)
             return
@@ -171,6 +172,11 @@ class BrevoMessage(models.Model):
         if not frozen:
             self.total_opened = stats['opened']
             self.total_clicked = stats['clicked']
+        else:
+            # Email cancellate dopo la conservazione (es. clean_internal_emails):
+            # le aperture non possono superare le consegne rimaste
+            self.total_opened = min(self.total_opened, self.total_delivered)
+            self.total_clicked = min(self.total_clicked, self.total_delivered)
         self.total_bounced = stats['bounced']
         self.total_blocked = stats['blocked']
         self.total_bounced_hard = b_hard
@@ -181,7 +187,7 @@ class BrevoMessage(models.Model):
         # Calcola rates
         if self.total_sent > 0:
             self.delivery_rate = round(self.total_delivered / self.total_sent * 100, 2)
-        if self.total_delivered > 0 and not frozen:
+        if self.total_delivered > 0:
             self.open_rate = round(self.total_opened / self.total_delivered * 100, 2)
             self.click_rate = round(self.total_clicked / self.total_delivered * 100, 2)
 
