@@ -7,7 +7,7 @@ import requests
 from urllib.parse import quote
 from .models import BrevoMessage, BrevoEmail
 from .sender_utils import get_allowed_senders, is_sender_allowed
-from .tracking import TRACKING_EVENT_TYPES, is_anonymous_tracking
+from .tracking import TRACKING_EVENT_TYPES, get_min_aggregate_recipients, is_anonymous_tracking
 from .serializers import (
     BrevoMessageSerializer,
     BrevoEmailListSerializer,
@@ -47,9 +47,23 @@ def dashboard_api(request):
         delivery_rate = 0.0
 
     if is_anonymous_tracking():
-        # Tassi globali non disponibili: sommerebbero totali storici e invii senza dati (#20)
-        open_rate = None
-        click_rate = None
+        # Tassi globali sui soli messaggi con totali aggregati (conservati o letti
+        # dall'API di Brevo, sopra soglia): sommare anche gli invii senza dati
+        # abbasserebbe il tasso a ogni nuovo invio (#20, #22)
+        with_totals = all_messages.filter(
+            tracking_totals_frozen=True,
+            total_delivered__gte=get_min_aggregate_recipients(),
+        ).aggregate(
+            delivered=Sum('total_delivered'),
+            opened=Sum('total_opened'),
+            clicked=Sum('total_clicked'),
+        )
+        if with_totals['delivered']:
+            open_rate = round((with_totals['opened'] or 0) / with_totals['delivered'] * 100, 2)
+            click_rate = round((with_totals['clicked'] or 0) / with_totals['delivered'] * 100, 2)
+        else:
+            open_rate = None
+            click_rate = None
     elif total_delivered > 0:
         open_rate = round((kpi['total_opened'] or 0) / total_delivered * 100, 2)
         click_rate = round((kpi['total_clicked'] or 0) / total_delivered * 100, 2)

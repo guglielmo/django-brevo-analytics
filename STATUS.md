@@ -9,7 +9,7 @@ Provenienza: [#20](https://github.com/guglielmo/django-brevo-analytics/issues/20
 Stato: 0.11.0 pubblicata su PyPI il 2026-10-29; riferimento in README, sezione "Anonymous Tracking".
 
 - [ ] da verificare: forma degli eventi anonimizzati al webhook (invio di prova con l'anonimizzazione attiva su Brevo)
-- [ ] opzionale: tassi aggregati dall'API di statistiche di Brevo
+- [ ] tassi aggregati dall'API di statistiche di Brevo (priorità alzata): comando `fetch_brevo_rates` nel branch `feat/22-brevo-api-rates`; serve un tag per invio, in Infoparlamento da aggiungere in `newsletter/jobs.py`
 - [ ] opzionale: conservazione limitata (`RETENTION_MONTHS`)
 - [ ] minore: interfaccia che distingua i totali storici; `verify_brevo_stats` in modalità anonima
 

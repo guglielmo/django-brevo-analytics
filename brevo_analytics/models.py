@@ -62,6 +62,13 @@ class BrevoMessage(models.Model):
         help_text="Totali e tassi di apertura e clic storici, conservati in forma aggregata "
                   "dopo la cancellazione degli eventi per destinatario."
     )
+    # Totali di apertura e clic letti dall'API di statistiche aggregate di Brevo
+    # (fetch_brevo_rates, #22): con tracking_totals_frozen, perché non vengono
+    # dagli eventi; questa data dice quando sono stati aggiornati l'ultima volta
+    tracking_totals_fetched_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Ultimo aggiornamento dei totali di apertura e clic dall'API di Brevo."
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
