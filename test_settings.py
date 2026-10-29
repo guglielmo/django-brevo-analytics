@@ -68,3 +68,6 @@ BREVO_ANALYTICS = {
 }
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Hashing veloce: i test che creano superutenti non devono costare secondi
+PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
