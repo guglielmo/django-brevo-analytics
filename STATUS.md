@@ -2,24 +2,17 @@
 
 Da dove riprendere. Il dettaglio sta nei documenti linkati e nelle issue.
 
-## 1. Tracciamento di aperture e clic conforme alle linee guida del Garante sul pixel
+## 1. Tracciamento anonimo: verifiche e seguiti della 0.11.0
 
-Piano: `journal/2026-10-29-piano-tracking-gdpr.md`. Issue: [#20](https://github.com/guglielmo/django-brevo-analytics/issues/20).
-Stato: implementato nel branch `feat/20-anonymous-tracking`, da revisionare e rilasciare.
-Scadenza di adeguamento delle linee guida: 29 ottobre 2026.
+Issue: [#22](https://github.com/guglielmo/django-brevo-analytics/issues/22).
+Provenienza: [#20](https://github.com/guglielmo/django-brevo-analytics/issues/20), piano in `journal/chiusi/2026-10-29-piano-tracking-gdpr.md`.
+Stato: 0.11.0 pubblicata su PyPI il 2026-10-29; riferimento in README, sezione "Anonymous Tracking".
 
-- [x] webhook: impostazione `ANONYMOUS_TRACKING` (default attiva), aperture e clic ignorati, niente più `raw`
-- [x] comando `anonymize_tracking_data` per ripulire i dati già salvati
-- [x] import da CSV: salta aperture e clic, corregge "Caricata per procura"
-- [x] statistiche e interfaccia: tassi "non disponibile", via filtri per destinatario e IP/user agent
-- [x] test e documentazione (README, CHANGELOG sotto Unreleased)
-- [x] review approfondita: corretti comando di pulizia (a blocchi, conferma, soglia di 10 destinatari per i totali storici), tassi sui totali conservati, eventi anonimizzati e sconosciuti nel webhook
-- [ ] rilascio 0.11.0 (bump di versione, tag, release GitHub)
-- [x] test della suite su PostgreSQL 16 (`TEST_DB=postgres`): 126 test OK, nessuno saltato
-- [ ] da verificare: forma degli eventi anonimi al webhook (invio di prova)
-- [x] deciso: i totali storici di apertura e clic si conservano di default; `--discard-totals` per cancellarli
-- [ ] opzionale: tassi aggregati dall'API di Brevo; conservazione limitata
+- [ ] da verificare: forma degli eventi anonimizzati al webhook (invio di prova con l'anonimizzazione attiva su Brevo)
+- [ ] opzionale: tassi aggregati dall'API di statistiche di Brevo
+- [ ] opzionale: conservazione limitata (`RETENTION_MONTHS`)
+- [ ] minore: interfaccia che distingua i totali storici; `verify_brevo_stats` in modalità anonima
 
-Raccordi: la 0.11.0 va in produzione **prima** di attivare "Anonymous email
-tracking" sugli account Brevo; dopo il deploy, `anonymize_tracking_data` su ogni
-installazione.
+Raccordi: in produzione l'ordine è aggiornamento alla 0.11.0, `migrate`,
+`anonymize_tracking_data`, poi "Anonymous email tracking" attivo su Brevo; la
+verifica al primo punto si fa subito dopo, sullo stesso account.
