@@ -217,21 +217,63 @@ event type and the setting, so Brevo does not retry them, no error is logged and
 no placeholder email is created. Event types the package does not know are
 ignored too, so a new Brevo event cannot be stored per recipient by default.
 
-### Enabling Anonymous Tracking in Brevo
+### Making the Pixel Anonymous in Brevo
 
 The package setting stops storing the data; the pixel itself is inserted by
-Brevo. Enable "Anonymous email tracking" in each Brevo account (Settings →
-Automations → Transactional emails → Tracking; marketing campaigns have a
-separate switch). It applies to future events only.
+Brevo, which must not keep per-recipient data either. A Brevo account has two
+ways to do it (both apply to future events only, and in both cases Brevo still
+counts opens and clicks in aggregate, see `fetch_brevo_rates` below):
 
-### Per-Recipient Tracking
+1. **"Anonymous email tracking"** (Settings → Automations → Transactional
+   emails → Tracking; marketing campaigns have a separate switch): every open
+   and click is anonymized, **including recipients who consented**. Use it when
+   nobody needs per-recipient data.
+2. **"Per-contact pixel tracking consent"** (Settings → Contacts), with
+   **"Track contacts whose consent is unknown" set to No**, and "Anonymous email
+   tracking" switched **off**: opens and clicks are identified only for
+   recipients sent with `contactPixelTrackingConsent: true`; recipients with
+   `false` or without the field are anonymous. Use it to track consenting
+   recipients only (see below). With this option the protection of everybody
+   else depends on the "unknown = No" setting: keep it that way.
 
-Set `ANONYMOUS_TRACKING = False` to get the behaviour of previous versions back
-(per-recipient opens and clicks, with IP address, user agent and clicked link).
-Under the guidelines this requires the recipients' consent, an information
-notice, and a way to withdraw consent to tracking alone while still receiving
-the emails. Brevo's anonymization switch is per account, so it cannot be
-disabled for consenting recipients only.
+Verified on a real account (October 2026): with option 1 active, an email sent
+with `contactPixelTrackingConsent: true` was anonymized too; with option 2 alone,
+only that email was identified.
+
+Anonymized opens and clicks reach Brevo's event API with an empty recipient and
+a placeholder message ID (`an#…`), and in log exports as "Anonymized": the
+package ignores them in every mode.
+
+### Per-Recipient Tracking with Consent
+
+Under the guidelines, per-recipient opens and clicks require the recipients'
+consent, an information notice, and a way to withdraw consent to tracking alone
+while still receiving the emails. Brevo supports this (option 2 above):
+
+- **at send time**, each recipient of `to`, `cc` and `bcc` carries
+  `contactPixelTrackingConsent` (`true` / `false`; absent = unknown). With
+  Django and Anymail, replace the recipient list through `esp_extra`:
+
+  ```python
+  message.esp_extra = {"bcc": [
+      {"email": r, "contactPixelTrackingConsent": has_consent(r)} for r in recipients
+  ]}
+  ```
+
+- **withdrawal**: the `{{ revoke_open_pixel_tracking }}` link in the footer sets
+  the contact's "Pixel Tracking Consent" attribute to No; the sender must stop
+  passing `true` for that recipient.
+
+**Package support (as of 0.12.0) is partial.** There is no dedicated mode yet
+(see issue #24). `ANONYMOUS_TRACKING = False` stores identified opens and clicks,
+and with option 2 those come only from consenting recipients (anonymized ones
+are discarded), but:
+
+- open/click totals and rates computed from the events count only consenting
+  recipients, so they look lower than they are;
+- withdrawal is not handled: events already stored for a recipient who later
+  withdraws stay in the database;
+- the dashboard does not distinguish "did not consent" from "did not open".
 
 ### Open and Click Rates from Brevo's Statistics API
 

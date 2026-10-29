@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- README: Brevo now supports per-recipient tracking consent ("Per-contact pixel tracking consent", `contactPixelTrackingConsent` at send time). The README said it could not be done; it now documents both account options (global anonymization, per-contact consent), the result of the tests on a real account, and what the package does and does not support yet (#24).
+
 ## [0.12.0] - 2026-10-29
 
 ### Added
