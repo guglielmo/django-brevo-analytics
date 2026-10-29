@@ -20,6 +20,7 @@ import time
 from typing import Optional
 from brevo_analytics.models import BrevoMessage, BrevoEmail
 from brevo_analytics.sender_utils import get_allowed_senders, build_sender_sql_clause
+from brevo_analytics.tracking import ANONYMIZED_VALUES, TRACKING_EVENT_TYPES, is_anonymous_tracking
 
 
 # Mapping from CSV st_text values to our event types
@@ -28,7 +29,7 @@ from brevo_analytics.sender_utils import get_allowed_senders, build_sender_sql_c
 EVENT_TYPE_MAPPING = {
     'Inviata': 'sent',
     'Consegnata': 'delivered',
-    'Caricata per procura': 'delivered',  # Alternative delivered status
+    'Caricata per procura': 'opened',  # apertura via proxy (Brevo: "Loaded by proxy")
     'Prima apertura': 'opened',
     'Aperta': None,
     'Cliccata': 'clicked',
@@ -134,6 +135,19 @@ class Command(BaseCommand):
                 excluded_conditions = " AND ".join([f"email NOT LIKE '%@{domain}'" for domain in excluded_domains])
                 excluded_clause = f"AND ({excluded_conditions})"
 
+            # Righe anonimizzate da Brevo ("Anonymous email tracking"): non si
+            # collegano a nessun invio, quindi si escludono (#20). Si contano
+            # solo quelle dei mittenti autorizzati.
+            anonymized_values = ", ".join(f"'{v}'" for v in sorted(ANONYMIZED_VALUES))
+            anonymized_condition = (
+                f"(lower(trim(mid)) IN ({anonymized_values}) "
+                f"OR lower(trim(email)) IN ({anonymized_values}))"
+            )
+            anonymized_rows = conn.execute(f"""
+                SELECT COUNT(*) FROM logs
+                WHERE ({senders_clause}) AND {anonymized_condition}
+            """).fetchone()[0]
+
             conn.execute(f"""
                 CREATE TABLE parsed_logs AS
                 SELECT
@@ -150,6 +164,7 @@ class Command(BaseCommand):
                   AND mid != 'NA'
                   AND email IS NOT NULL
                   AND sub IS NOT NULL
+                  AND NOT {anonymized_condition}
                   AND ({senders_clause})
                   {excluded_clause}
             """)
@@ -199,6 +214,10 @@ class Command(BaseCommand):
             if dry_run:
                 self.stdout.write("\n🔍 DRY RUN - No data imported")
                 self._show_statistics(conn)
+                if is_anonymous_tracking():
+                    self.stdout.write("ℹ️  Open/click events will be skipped (ANONYMOUS_TRACKING)")
+                if anonymized_rows > 0:
+                    self.stdout.write(f"ℹ️  Anonymized log entries skipped: {anonymized_rows:,}")
                 return
 
             # Import into Django with bulk operations
@@ -222,6 +241,9 @@ class Command(BaseCommand):
             messages_dict = {}  # (subject, sent_date) -> BrevoMessage
             bounces_enriched = 0
             bounces_failed = 0
+            # In modalità anonima aperture e clic non si importano (#20)
+            anonymous_tracking = is_anonymous_tracking()
+            tracking_skipped = 0
 
             # Process in batches
             BATCH_SIZE = 500
@@ -327,6 +349,10 @@ class Command(BaseCommand):
 
                         # Skip explicitly ignored events (e.g. repeated opens)
                         if event_type is None:
+                            continue
+
+                        if anonymous_tracking and event_type in TRACKING_EVENT_TYPES:
+                            tracking_skipped += 1
                             continue
 
                         event_timestamp_raw = event_raw['timestamp']
@@ -449,6 +475,12 @@ class Command(BaseCommand):
 
             if duplicates_skipped > 0:
                 self.stdout.write(f"ℹ️  Skipped {duplicates_skipped:,} duplicate entries in CSV")
+
+            if tracking_skipped > 0:
+                self.stdout.write(f"ℹ️  Skipped {tracking_skipped:,} open/click events (ANONYMOUS_TRACKING)")
+
+            if anonymized_rows > 0:
+                self.stdout.write(f"ℹ️  Skipped {anonymized_rows:,} anonymized log entries")
 
             if api_key and (bounces_enriched > 0 or bounces_failed > 0):
                 self.stdout.write(f"✓ Enriched {bounces_enriched}/{bounces_enriched + bounces_failed} bounces with reasons from API")

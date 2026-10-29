@@ -55,6 +55,14 @@ class BrevoMessage(models.Model):
         help_text="Statistiche da ricalcolare (impostato dal webhook con STATS_UPDATE='deferred')."
     )
 
+    # Totali di apertura e clic conservati da anonymize_tracking_data (#20):
+    # update_stats() non li ricalcola più dagli eventi, che sono stati cancellati
+    tracking_totals_frozen = models.BooleanField(
+        default=False,
+        help_text="Totali e tassi di apertura e clic storici, conservati in forma aggregata "
+                  "dopo la cancellazione degli eventi per destinatario."
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -96,12 +104,13 @@ class BrevoMessage(models.Model):
 
         emails = self.emails.all()
         total = emails.count()
+        # Totali storici conservati: i totali di aperture e clic non si
+        # ricalcolano dagli eventi (cancellati), i tassi sì, sulle consegne attuali
+        frozen = self.tracking_totals_frozen
 
         if total == 0:
             self.total_sent = 0
             self.total_delivered = 0
-            self.total_opened = 0
-            self.total_clicked = 0
             self.total_bounced = 0
             self.total_blocked = 0
             self.total_bounced_hard = 0
@@ -109,6 +118,9 @@ class BrevoMessage(models.Model):
             self.total_bounced_undetermined = 0
             self.total_deferred = 0
             self.delivery_rate = 0.0
+            if not frozen:
+                self.total_opened = 0
+                self.total_clicked = 0
             self.open_rate = 0.0
             self.click_rate = 0.0
             self.sent_at = None
@@ -157,8 +169,14 @@ class BrevoMessage(models.Model):
 
         self.total_sent = sent_count
         self.total_delivered = stats['delivered']
-        self.total_opened = stats['opened']
-        self.total_clicked = stats['clicked']
+        if not frozen:
+            self.total_opened = stats['opened']
+            self.total_clicked = stats['clicked']
+        else:
+            # Email cancellate dopo la conservazione (es. clean_internal_emails):
+            # le aperture non possono superare le consegne rimaste
+            self.total_opened = min(self.total_opened, self.total_delivered)
+            self.total_clicked = min(self.total_clicked, self.total_delivered)
         self.total_bounced = stats['bounced']
         self.total_blocked = stats['blocked']
         self.total_bounced_hard = b_hard

@@ -95,6 +95,10 @@
   border: 2px solid transparent;
 }
 
+.kpi-bar .kpi-card.not-filterable {
+  cursor: default;
+}
+
 .kpi-bar .kpi-card.active {
   border-color: var(--secondary, #417690);
   background-color: var(--darkened-bg, #f0f7fa);

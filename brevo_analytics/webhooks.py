@@ -8,8 +8,37 @@ from django.utils import timezone
 from datetime import datetime
 from .models import BrevoMessage, BrevoEmail
 from .sender_utils import get_allowed_senders, is_sender_allowed
+from .tracking import is_anonymous_tracking, is_anonymized_value
 
 logger = logging.getLogger(__name__)
+
+# Eventi Brevo prodotti dal pixel di apertura e dal redirect dei link
+BREVO_TRACKING_EVENTS = {'opened', 'unique_opened', 'proxy_open', 'unique_proxy_open', 'click'}
+
+# Map Brevo event name to our event type
+# Reference: https://developers.brevo.com/docs/transactional-webhooks
+#
+# Events mapped to None are explicitly ignored (e.g. repeated 'opened'
+# events — only 'unique_opened' / first opening is tracked).
+# Events not listed here are ignored too (closed list, #20).
+EVENT_MAPPING = {
+    'request': 'sent',
+    'delivered': 'delivered',
+    'hard_bounce': 'bounced',
+    'soft_bounce': 'bounced',
+    'blocked': 'blocked',
+    'invalid_email': 'bounced',
+    'error': 'bounced',
+    'spam': 'spam',
+    'unsubscribed': 'unsubscribed',
+    'unsubscribe': 'unsubscribed',  # nome usato in alcuni payload: era salvato com'era
+    'opened': None,
+    'unique_opened': 'opened',
+    'proxy_open': None,
+    'unique_proxy_open': 'opened',
+    'click': 'clicked',
+    'deferred': 'deferred',
+}
 
 
 def _canonical_recipient(address):
@@ -83,9 +112,33 @@ def brevo_webhook(request):
     timestamp_unix = payload.get('ts_event')
     sender = payload.get('sender') or payload.get('from') or payload.get('sender_email', '')  # Brevo uses 'sender_email' in some events
 
+    # Aperture e clic (linee guida del Garante sui tracking pixel, #20):
+    # in modalità anonima non si registrano; gli eventi anonimizzati da Brevo
+    # (campi assenti o "Anonymized") non si possono assegnare a nessuna email.
+    # In entrambi i casi 200, così Brevo non ripete la chiamata e il log non
+    # si riempie di errori.
+    if event_type in BREVO_TRACKING_EVENTS:
+        if is_anonymous_tracking():
+            return JsonResponse({'status': 'ignored', 'reason': 'anonymous_tracking'})
+        if not message_id or not email_address:
+            logger.debug(f"Ignoring anonymized {event_type} event")
+            return JsonResponse({'status': 'ignored', 'reason': 'anonymized_event'})
+
+    # Identificativi anonimizzati da Brevo, per qualunque evento: senza
+    # questo controllo un 'delivered' anonimo creerebbe un'email fittizia
+    if is_anonymized_value(message_id) or is_anonymized_value(email_address):
+        logger.debug(f"Ignoring anonymized {event_type} event")
+        return JsonResponse({'status': 'ignored', 'reason': 'anonymized_event'})
+
     if not all([event_type, message_id, email_address, timestamp_unix]):
         logger.error(f"Missing required fields in webhook: {payload}")
         return HttpResponseBadRequest('Missing required fields')
+
+    # Lista chiusa: un tipo di evento che non conosciamo (es. una nuova
+    # variante del clic) non si salva per destinatario
+    if event_type not in EVENT_MAPPING:
+        logger.info(f"Ignoring unknown event type {event_type!r}")
+        return JsonResponse({'status': 'ignored', 'reason': 'unknown_event_type'})
 
     # CRITICAL: Verify sender is authorized (multi-tenant security)
     allowed_senders = get_allowed_senders()
@@ -125,30 +178,7 @@ def brevo_webhook(request):
 
     event_date = event_datetime.date()
 
-    # Map Brevo event name to our event type
-    # Reference: https://developers.brevo.com/docs/transactional-webhooks
-    #
-    # Events mapped to None are explicitly ignored (e.g. repeated 'opened'
-    # events — only 'unique_opened' / first opening is tracked).
-    event_mapping = {
-        'request': 'sent',
-        'delivered': 'delivered',
-        'hard_bounce': 'bounced',
-        'soft_bounce': 'bounced',
-        'blocked': 'blocked',
-        'invalid_email': 'bounced',
-        'error': 'bounced',
-        'spam': 'spam',
-        'unsubscribed': 'unsubscribed',
-        'opened': None,
-        'unique_opened': 'opened',
-        'proxy_open': None,
-        'unique_proxy_open': 'opened',
-        'click': 'clicked',
-        'deferred': 'deferred',
-    }
-
-    our_event_type = event_mapping.get(event_type, event_type)
+    our_event_type = EVENT_MAPPING[event_type]
 
     # Explicitly ignored events
     if our_event_type is None:
@@ -316,8 +346,7 @@ def brevo_webhook(request):
     if reported_email:
         extra_data['reported_email'] = reported_email
 
-    # Store raw payload for debugging
-    extra_data['raw'] = payload
+    # Il payload originale non si salva: ripete email, IP e user agent (#20)
 
     # 5. Add event (handles duplicates internally)
     added = email.add_event(our_event_type, event_datetime, **extra_data)

@@ -166,6 +166,7 @@ class ClickUrlTestCase(TestCase):
     @override_settings(BREVO_ANALYTICS={
         'ALLOWED_SENDERS': ['noreply@example.com'],
         'EXCLUDED_RECIPIENT_DOMAINS': [],
+        'ANONYMOUS_TRACKING': False,
     })
     def test_webhook_click_keeps_url(self):
         """Il webhook continua a salvare il link in `url`: lo leggono i progetti che usano il pacchetto."""
@@ -187,6 +188,7 @@ class ClickUrlTestCase(TestCase):
     @override_settings(BREVO_ANALYTICS={
         'ALLOWED_SENDERS': ['noreply@example.com'],
         'EXCLUDED_RECIPIENT_DOMAINS': [],
+        'ANONYMOUS_TRACKING': False,
     })
     def test_import_writes_url_and_keeps_link(self):
         import csv
@@ -568,7 +570,7 @@ class WebhookNormalizedRecipientTestCase(TestCase):
         self.assertEqual(message.total_sent, 1)
         self.assertEqual(message.total_delivered, 1)
 
-    @override_settings(BREVO_ANALYTICS=SETTINGS)
+    @override_settings(BREVO_ANALYTICS={**SETTINGS, 'ANONYMOUS_TRACKING': False})
     def test_non_creation_event_with_stripped_plus_tag_attaches(self):
         """A non-creation event (unique_opened) with normalized recipient
         must attach to the existing row instead of being ignored."""
@@ -985,8 +987,9 @@ class AllowedSenderMatchingTestCase(TestCase):
         self.assertEqual(response.json()['reason'], 'unauthorized_sender')
 
 
+@override_settings(BREVO_ANALYTICS={'ANONYMOUS_TRACKING': False})
 class StatusFilterApiTestCase(TestCase):
-    """Tests for cumulative status filter in message_emails_api"""
+    """Tests for cumulative status filter in message_emails_api (per-recipient tracking)"""
 
     def setUp(self):
         self.message = BrevoMessage.objects.create(
@@ -1498,3 +1501,434 @@ class DeferredStatsConcurrencyTestCase(TransactionTestCase):
                 first.join(10)
                 second.join(10)
         self.assertEqual(order, ['J1', 'J2'])
+
+
+def _write_logs_csv(rows):
+    """CSV di log Brevo per import_brevo_logs; restituisce il path (da cancellare)."""
+    import csv
+    import tempfile
+    f = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, newline='')
+    writer = csv.DictWriter(f, fieldnames=['st_text', 'ts', 'sub', 'frm', 'email', 'tag', 'mid', 'link'])
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+    f.close()
+    return f.name
+
+
+ANONYMOUS = {'ALLOWED_SENDERS': ['noreply@example.com'], 'EXCLUDED_RECIPIENT_DOMAINS': []}
+PER_RECIPIENT = {**ANONYMOUS, 'ANONYMOUS_TRACKING': False}
+
+
+class AnonymousTrackingWebhookTestCase(TestCase):
+    """Linee guida del Garante sui tracking pixel (#20): webhook."""
+
+    BASE = {
+        'message-id': '<anon@example.com>', 'email': 'r@example.com',
+        'subject': 'Newsletter', 'sender': 'noreply@example.com',
+    }
+
+    def _post(self, **payload):
+        return self.client.post(
+            '/brevo-analytics/webhook/',
+            data=json.dumps({**self.BASE, 'ts_event': int(time.time()), **payload}),
+            content_type='application/json',
+        )
+
+    def _email(self):
+        return BrevoEmail.objects.get(brevo_message_id='<anon@example.com>')
+
+    @override_settings(BREVO_ANALYTICS=ANONYMOUS)
+    def test_opens_and_clicks_are_ignored_by_default(self):
+        self.assertEqual(self._post(event='request').status_code, 200)
+        self.assertEqual(self._post(event='delivered').status_code, 200)
+        for event in ('unique_opened', 'opened', 'unique_proxy_open', 'proxy_open', 'click'):
+            response = self._post(event=event, ip='1.2.3.4', user_agent='UA', link='https://a.example.com')
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {'status': 'ignored', 'reason': 'anonymous_tracking'})
+        email = self._email()
+        self.assertEqual(email.current_status, 'delivered')
+        self.assertEqual([e['type'] for e in email.events], ['sent', 'delivered'])
+
+    @override_settings(BREVO_ANALYTICS=ANONYMOUS)
+    def test_hard_bounce_is_still_recorded(self):
+        self._post(event='request')
+        response = self._post(event='hard_bounce', reason='mailbox does not exist')
+        self.assertEqual(response.status_code, 200)
+        bounce = [e for e in self._email().events if e['type'] == 'bounced'][0]
+        self.assertEqual(bounce['bounce_type'], 'hard')
+        self.assertEqual(bounce['bounce_reason'], 'mailbox does not exist')
+
+    @override_settings(BREVO_ANALYTICS=ANONYMOUS)
+    def test_raw_payload_is_not_stored(self):
+        self._post(event='request')
+        self._post(event='delivered')
+        self.assertTrue(all('raw' not in e for e in self._email().events))
+
+    @override_settings(BREVO_ANALYTICS=PER_RECIPIENT)
+    def test_anonymized_events_are_ignored_without_errors(self):
+        """Eventi anonimizzati da Brevo, in qualunque forma arrivino: 200 e nessuna modifica."""
+        self._post(event='request')
+        for missing in ({'message-id': None, 'email': None},
+                        {'message-id': 'Anonymized', 'email': 'Anonymized'},
+                        {'email': 'Anonymized contact'}):
+            for event in ('unique_opened', 'click'):
+                with self.assertNoLogs('brevo_analytics.webhooks', level='ERROR'):
+                    response = self._post(event=event, **missing)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()['reason'], 'anonymized_event')
+        self.assertEqual(self._email().current_status, 'sent')
+
+    @override_settings(BREVO_ANALYTICS=PER_RECIPIENT)
+    def test_per_recipient_tracking_when_disabled(self):
+        self._post(event='request')
+        self._post(event='unique_opened', ip='1.2.3.4', user_agent='UA')
+        email = self._email()
+        self.assertEqual(email.current_status, 'opened')
+        opened = [e for e in email.events if e['type'] == 'opened'][0]
+        self.assertEqual(opened['ip'], '1.2.3.4')
+        self.assertNotIn('raw', opened)
+
+    @override_settings(BREVO_ANALYTICS=ANONYMOUS)
+    def test_anonymized_delivery_does_not_create_a_row(self):
+        """Se Brevo anonimizzasse anche una consegna: nessuna email fittizia."""
+        response = self._post(event='delivered', **{'message-id': 'Anonymized', 'email': 'Anonymized contact'})
+        self.assertEqual(response.json()['reason'], 'anonymized_event')
+        self.assertFalse(BrevoEmail.objects.all_unfiltered().exists())
+
+    @override_settings(BREVO_ANALYTICS=PER_RECIPIENT)
+    def test_real_address_starting_with_anonymized_is_kept(self):
+        self._post(event='request', email='anonymized.smith@example.com')
+        self._post(event='unique_opened', email='anonymized.smith@example.com')
+        email = BrevoEmail.objects.get(recipient_email='anonymized.smith@example.com')
+        self.assertEqual(email.current_status, 'opened')
+
+    @override_settings(BREVO_ANALYTICS=PER_RECIPIENT)
+    def test_unknown_event_types_are_ignored(self):
+        self._post(event='request')
+        response = self._post(event='unique_click', link='https://a.example.com')
+        self.assertEqual(response.json(), {'status': 'ignored', 'reason': 'unknown_event_type'})
+        self.assertEqual([e['type'] for e in self._email().events], ['sent'])
+
+    @override_settings(BREVO_ANALYTICS=ANONYMOUS)
+    def test_unsubscribe_alias_is_mapped(self):
+        self._post(event='request')
+        self._post(event='unsubscribe')
+        self.assertEqual([e['type'] for e in self._email().events], ['sent', 'unsubscribed'])
+
+
+class AnonymousTrackingImportTestCase(TestCase):
+    """Linee guida del Garante sui tracking pixel (#20): import da CSV."""
+
+    ROW = {'sub': 'Newsletter', 'frm': 'noreply@example.com', 'email': 'r@example.com',
+           'tag': '', 'mid': '<imp-anon@example.com>', 'link': ''}
+
+    def _import(self, extra_rows):
+        import os
+        path = _write_logs_csv([
+            {**self.ROW, 'st_text': 'Inviata', 'ts': '17-09-2024 10:00:00'},
+            {**self.ROW, 'st_text': 'Consegnata', 'ts': '17-09-2024 10:00:05'},
+            *extra_rows,
+        ])
+        out = StringIO()
+        try:
+            call_command('import_brevo_logs', path, stdout=out)
+        finally:
+            os.unlink(path)
+        return BrevoEmail.objects.get(brevo_message_id='imp-anon@example.com'), out.getvalue()
+
+    TRACKING_ROWS = [
+        {**ROW, 'st_text': 'Prima apertura', 'ts': '17-09-2024 10:01:00'},
+        {**ROW, 'st_text': 'Caricata per procura', 'ts': '17-09-2024 10:01:30'},
+        {**ROW, 'st_text': 'Cliccata', 'ts': '17-09-2024 10:02:00', 'link': 'https://a.example.com'},
+        {**ROW, 'st_text': 'Cliccata', 'ts': '17-09-2024 10:03:00',
+         'mid': 'Anonymized', 'email': 'Anonymized', 'link': 'Anonymized data'},
+    ]
+
+    @override_settings(BREVO_ANALYTICS=ANONYMOUS)
+    def test_opens_and_clicks_are_skipped_and_counted(self):
+        email, output = self._import(self.TRACKING_ROWS)
+        self.assertEqual(email.current_status, 'delivered')
+        self.assertEqual([e['type'] for e in email.events], ['sent', 'delivered'])
+        self.assertIn('Skipped 3 open/click events', output)
+        self.assertIn('Skipped 1 anonymized log entries', output)
+
+    @override_settings(BREVO_ANALYTICS=ANONYMOUS)
+    def test_dry_run_reports_skipped_rows(self):
+        import os
+        path = _write_logs_csv([
+            {**self.ROW, 'st_text': 'Inviata', 'ts': '17-09-2024 10:00:00'},
+            *self.TRACKING_ROWS,
+        ])
+        out = StringIO()
+        try:
+            call_command('import_brevo_logs', path, '--dry-run', stdout=out)
+        finally:
+            os.unlink(path)
+        self.assertIn('Open/click events will be skipped', out.getvalue())
+        self.assertIn('Anonymized log entries skipped: 1', out.getvalue())
+        self.assertFalse(BrevoEmail.objects.all_unfiltered().exists())
+
+    @override_settings(BREVO_ANALYTICS=PER_RECIPIENT)
+    def test_loaded_by_proxy_is_an_open(self):
+        email, _ = self._import([{**self.ROW, 'st_text': 'Caricata per procura', 'ts': '17-09-2024 10:01:30'}])
+        self.assertEqual(email.current_status, 'opened')
+
+
+class TrackingTotalsFrozenTestCase(TestCase):
+    """Totali storici conservati da anonymize_tracking_data: i totali restano, i tassi si ricalcolano."""
+
+    def _frozen_message(self, delivered):
+        msg = BrevoMessage.objects.create(
+            subject="Storico", sent_date=timezone.now().date(), tracking_totals_frozen=True,
+            total_opened=7, total_clicked=3, open_rate=70.0, click_rate=30.0,
+        )
+        for i in range(delivered):
+            BrevoEmail.objects.create(
+                message=msg, brevo_message_id=f"<f{i}@x.it>", recipient_email=f"f{i}@x.it",
+                sent_at=timezone.now(), current_status='delivered',
+                events=[{'type': 'sent'}, {'type': 'delivered'}],
+            )
+        msg.update_stats()
+        msg.refresh_from_db()
+        return msg
+
+    def test_update_stats_keeps_frozen_open_and_click_totals(self):
+        msg = self._frozen_message(10)
+        self.assertEqual((msg.total_sent, msg.total_delivered), (10, 10))
+        self.assertEqual((msg.total_opened, msg.total_clicked, msg.open_rate, msg.click_rate),
+                         (7, 3, 70.0, 30.0))
+
+    def test_rates_follow_current_deliveries(self):
+        """Nuove consegne dopo la conservazione: i totali restano, i tassi scendono."""
+        msg = self._frozen_message(14)
+        self.assertEqual((msg.total_opened, msg.open_rate, msg.click_rate), (7, 50.0, 21.43))
+
+    def test_totals_never_exceed_deliveries(self):
+        """Email cancellate dopo la conservazione (es. clean_internal_emails)."""
+        msg = self._frozen_message(5)
+        self.assertEqual((msg.total_opened, msg.total_clicked, msg.open_rate), (5, 3, 100.0))
+
+    def test_message_without_emails_has_zero_rates(self):
+        msg = self._frozen_message(0)
+        self.assertEqual((msg.total_delivered, msg.open_rate, msg.click_rate), (0, 0.0, 0.0))
+
+
+@override_settings(BREVO_ANALYTICS={'MIN_AGGREGATE_RECIPIENTS': 1})
+class AnonymizeTrackingDataCommandTestCase(TestCase):
+    """Comando anonymize_tracking_data: pulizia dei dati storici (soglia a 1 destinatario)."""
+
+    def setUp(self):
+        self.msg = BrevoMessage.objects.create(subject="Storico", sent_date=timezone.now().date())
+        self.opened = BrevoEmail.objects.create(
+            message=self.msg, brevo_message_id="<o@x.it>", recipient_email="o@x.it",
+            sent_at=timezone.now(), current_status='clicked',
+            events=[
+                {'type': 'sent', 'timestamp': 't0', 'raw': {'email': 'o@x.it'}},
+                {'type': 'delivered', 'timestamp': 't1'},
+                {'type': 'opened', 'timestamp': 't2', 'ip': '1.2.3.4', 'user_agent': 'UA'},
+                {'type': 'clicked', 'timestamp': 't3', 'url': 'https://a.it', 'link': 'https://a.it'},
+            ],
+        )
+        self.bounced = BrevoEmail.objects.create(
+            message=self.msg, brevo_message_id="<b@x.it>", recipient_email="b@x.it",
+            sent_at=timezone.now(), current_status='bounced',
+            events=[
+                {'type': 'sent', 'timestamp': 't0'},
+                {'type': 'bounced', 'timestamp': 't1', 'bounce_type': 'hard',
+                 'bounce_reason': 'no such user', 'raw': {'email': 'b@x.it', 'ip': '5.6.7.8'}},
+            ],
+        )
+        self.msg.update_stats()
+
+    def _run(self, *args):
+        out = StringIO()
+        call_command('anonymize_tracking_data', '--no-input', *args, stdout=out)
+        return out.getvalue()
+
+    def test_dry_run_changes_nothing(self):
+        output = self._run('--dry-run')
+        self.assertIn('DRY RUN', output)
+        self.opened.refresh_from_db()
+        self.assertEqual(self.opened.current_status, 'clicked')
+        self.assertEqual(len(self.opened.events), 4)
+
+    def test_strips_tracking_data_and_keeps_bounces(self):
+        self._run()
+        self.opened.refresh_from_db()
+        self.bounced.refresh_from_db()
+        self.assertEqual(self.opened.current_status, 'delivered')
+        self.assertEqual(self.opened.events, [
+            {'type': 'sent', 'timestamp': 't0'},
+            {'type': 'delivered', 'timestamp': 't1'},
+        ])
+        self.assertEqual(self.bounced.current_status, 'bounced')
+        self.assertEqual(self.bounced.events[1], {
+            'type': 'bounced', 'timestamp': 't1', 'bounce_type': 'hard', 'bounce_reason': 'no such user',
+        })
+
+    def test_keeps_aggregate_totals_by_default(self):
+        self._run()
+        self.msg.refresh_from_db()
+        self.assertTrue(self.msg.tracking_totals_frozen)
+        self.assertEqual((self.msg.total_opened, self.msg.total_clicked), (1, 1))
+        self.assertEqual((self.msg.total_delivered, self.msg.total_bounced), (1, 1))
+
+    def test_discard_totals(self):
+        self._run('--discard-totals')
+        self.msg.refresh_from_db()
+        self.assertFalse(self.msg.tracking_totals_frozen)
+        self.assertEqual((self.msg.total_opened, self.msg.total_clicked), (0, 0))
+
+    def test_second_run_finds_nothing(self):
+        self._run()
+        output = self._run()
+        self.assertIn('Emails with tracking data: 0', output)
+
+    @override_settings(BREVO_ANALYTICS={'BLACKLIST_ONLY_MODE': True})
+    def test_disabled_in_blacklist_only_mode(self):
+        output = self._run()
+        self.assertIn('disabled in BLACKLIST_ONLY_MODE', output)
+        self.opened.refresh_from_db()
+        self.assertEqual(self.opened.current_status, 'clicked')
+
+    def test_discard_totals_after_keeping_them(self):
+        """--discard-totals funziona anche dopo una prima esecuzione che li ha conservati."""
+        self._run()
+        output = self._run('--discard-totals')
+        self.assertNotIn('Nothing to clean', output)
+        self.msg.refresh_from_db()
+        self.assertFalse(self.msg.tracking_totals_frozen)
+        self.assertEqual((self.msg.total_opened, self.msg.open_rate), (0, 0.0))
+
+    @override_settings(BREVO_ANALYTICS={'MIN_AGGREGATE_RECIPIENTS': 10})
+    def test_totals_below_threshold_are_not_kept(self):
+        """Un messaggio con un solo destinatario consegnato: il totale direbbe chi ha aperto."""
+        self._run()
+        self.msg.refresh_from_db()
+        self.assertFalse(self.msg.tracking_totals_frozen)
+        self.assertEqual((self.msg.total_opened, self.msg.total_clicked), (0, 0))
+
+    def test_kept_totals_are_a_first_run_snapshot(self):
+        """Aperture arrivate dopo la prima esecuzione si cancellano senza entrare nei totali."""
+        self._run()
+        late = BrevoEmail.objects.create(
+            message=self.msg, brevo_message_id="<late@x.it>", recipient_email="late@x.it",
+            sent_at=timezone.now(), current_status='opened',
+            events=[{'type': 'sent'}, {'type': 'delivered'}, {'type': 'opened', 'ip': '9.9.9.9'}],
+        )
+        self._run()
+        late.refresh_from_db()
+        self.msg.refresh_from_db()
+        self.assertEqual(late.current_status, 'delivered')
+        self.assertEqual((self.msg.total_opened, self.msg.total_delivered, self.msg.open_rate), (1, 2, 50.0))
+
+    @override_settings(BREVO_ANALYTICS={'ANONYMOUS_TRACKING': False})
+    def test_refused_with_per_recipient_tracking(self):
+        output = self._run()
+        self.assertIn('ANONYMOUS_TRACKING is False', output)
+        self.opened.refresh_from_db()
+        self.assertEqual(self.opened.current_status, 'clicked')
+
+    @override_settings(BREVO_ANALYTICS={'ANONYMOUS_TRACKING': False, 'MIN_AGGREGATE_RECIPIENTS': 1})
+    def test_force_with_per_recipient_tracking(self):
+        self._run('--force')
+        self.opened.refresh_from_db()
+        self.assertEqual(self.opened.current_status, 'delivered')
+
+    def test_asks_for_confirmation(self):
+        out = StringIO()
+        with mock.patch('builtins.input', return_value='no'):
+            call_command('anonymize_tracking_data', stdout=out)
+        self.assertIn('Operation cancelled', out.getvalue())
+        self.opened.refresh_from_db()
+        self.assertEqual(self.opened.current_status, 'clicked')
+
+    @override_settings(BREVO_ANALYTICS={'STATS_UPDATE': 'deferred', 'MIN_AGGREGATE_RECIPIENTS': 1})
+    def test_deferred_mode_clears_dirty_and_keeps_totals(self):
+        BrevoMessage.objects.filter(pk=self.msg.pk).update(stats_dirty=True)
+        self._run()
+        self.msg.refresh_from_db()
+        self.assertFalse(self.msg.stats_dirty)
+        self.assertTrue(self.msg.tracking_totals_frozen)
+        self.assertEqual(self.msg.total_opened, 1)
+
+
+class AnonymousTrackingApiTestCase(TestCase):
+    """API in modalità anonima: niente dati per destinatario, tassi non disponibili."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        self.msg = BrevoMessage.objects.create(subject="Api", sent_date=timezone.now().date())
+        self.email = BrevoEmail.objects.create(
+            message=self.msg, brevo_message_id="<api@x.it>", recipient_email="api@x.it",
+            sent_at=timezone.now(), current_status='opened',
+            events=[
+                {'type': 'sent', 'timestamp': 't0', 'raw': {'email': 'api@x.it'}},
+                {'type': 'delivered', 'timestamp': 't1'},
+                {'type': 'opened', 'timestamp': 't2', 'ip': '1.2.3.4', 'user_agent': 'UA'},
+            ],
+        )
+        self.msg.update_stats()
+        User.objects.create_superuser('admin', 'admin@test.com', 'password')
+        self.client.login(username='admin', password='password')
+
+    @override_settings(BREVO_ANALYTICS=ANONYMOUS)
+    def test_rates_are_not_available(self):
+        data = self.client.get('/brevo-analytics/api/dashboard/').json()
+        self.assertIsNone(data['kpi']['open_rate'])
+        self.assertIsNone(data['kpi']['click_rate'])
+        msg = data['recent_messages'][0]
+        self.assertIsNone(msg['open_rate'])
+        self.assertIsNone(msg['total_opened'])
+        self.assertFalse(msg['recipient_tracking'])
+
+    @override_settings(BREVO_ANALYTICS={**ANONYMOUS, 'MIN_AGGREGATE_RECIPIENTS': 1})
+    def test_frozen_totals_are_shown(self):
+        BrevoMessage.objects.filter(pk=self.msg.pk).update(tracking_totals_frozen=True)
+        msg = self.client.get('/brevo-analytics/api/messages/').json()['messages'][0]
+        self.assertEqual(msg['total_opened'], 1)
+        self.assertEqual(msg['open_rate'], 100.0)
+
+    @override_settings(BREVO_ANALYTICS=ANONYMOUS)
+    def test_frozen_totals_below_threshold_are_hidden(self):
+        BrevoMessage.objects.filter(pk=self.msg.pk).update(tracking_totals_frozen=True)
+        msg = self.client.get('/brevo-analytics/api/messages/').json()['messages'][0]
+        self.assertIsNone(msg['total_opened'])
+        self.assertIsNone(msg['open_rate'])
+
+    @override_settings(BREVO_ANALYTICS=ANONYMOUS)
+    def test_delivered_filter_includes_previously_opened(self):
+        for status in ('delivered', 'sent'):
+            listed = self.client.get(
+                f'/brevo-analytics/api/messages/{self.msg.id}/emails/?status={status}'
+            ).json()['emails']
+            self.assertEqual([(e['recipient_email'], e['current_status']) for e in listed],
+                             [('api@x.it', 'delivered')])
+
+    @override_settings(BREVO_ANALYTICS=ANONYMOUS)
+    def test_open_and_click_filters_are_refused(self):
+        for status in ('opened', 'clicked'):
+            response = self.client.get(f'/brevo-analytics/api/messages/{self.msg.id}/emails/?status={status}')
+            self.assertEqual(response.status_code, 400)
+
+    @override_settings(BREVO_ANALYTICS=ANONYMOUS)
+    def test_email_detail_hides_opens_and_raw(self):
+        data = self.client.get(f'/brevo-analytics/api/emails/{self.email.id}/').json()
+        self.assertEqual(data['current_status'], 'delivered')
+        self.assertEqual(data['events'], [
+            {'type': 'sent', 'timestamp': 't0'},
+            {'type': 'delivered', 'timestamp': 't1'},
+        ])
+        listed = self.client.get(f'/brevo-analytics/api/messages/{self.msg.id}/emails/').json()['emails']
+        self.assertEqual(listed[0]['current_status'], 'delivered')
+
+    @override_settings(BREVO_ANALYTICS=PER_RECIPIENT)
+    def test_per_recipient_mode_unchanged(self):
+        data = self.client.get('/brevo-analytics/api/dashboard/').json()
+        self.assertEqual(data['kpi']['open_rate'], 100.0)
+        self.assertTrue(data['recent_messages'][0]['recipient_tracking'])
+        detail = self.client.get(f'/brevo-analytics/api/emails/{self.email.id}/').json()
+        self.assertEqual(detail['current_status'], 'opened')
+        self.assertEqual(detail['events'][2]['ip'], '1.2.3.4')
+        self.assertNotIn('raw', detail['events'][0])
