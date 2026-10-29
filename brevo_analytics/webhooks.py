@@ -8,8 +8,12 @@ from django.utils import timezone
 from datetime import datetime
 from .models import BrevoMessage, BrevoEmail
 from .sender_utils import get_allowed_senders, is_sender_allowed
+from .tracking import is_anonymous_tracking, is_anonymized_value
 
 logger = logging.getLogger(__name__)
+
+# Eventi Brevo prodotti dal pixel di apertura e dal redirect dei link
+BREVO_TRACKING_EVENTS = {'opened', 'unique_opened', 'proxy_open', 'unique_proxy_open', 'click'}
 
 
 def _canonical_recipient(address):
@@ -82,6 +86,17 @@ def brevo_webhook(request):
     tags = payload.get('tags', [])
     timestamp_unix = payload.get('ts_event')
     sender = payload.get('sender') or payload.get('from') or payload.get('sender_email', '')  # Brevo uses 'sender_email' in some events
+
+    # Aperture e clic (linee guida del Garante sui tracking pixel, #20):
+    # in modalità anonima non si registrano; gli eventi anonimizzati da Brevo
+    # non si possono assegnare a nessuna email. In entrambi i casi 200, così
+    # Brevo non ripete la chiamata e il log non si riempie di errori.
+    if event_type in BREVO_TRACKING_EVENTS:
+        if is_anonymous_tracking():
+            return JsonResponse({'status': 'ignored', 'reason': 'anonymous_tracking'})
+        if is_anonymized_value(message_id) or is_anonymized_value(email_address):
+            logger.debug(f"Ignoring anonymized {event_type} event")
+            return JsonResponse({'status': 'ignored', 'reason': 'anonymized_event'})
 
     if not all([event_type, message_id, email_address, timestamp_unix]):
         logger.error(f"Missing required fields in webhook: {payload}")
@@ -316,8 +331,7 @@ def brevo_webhook(request):
     if reported_email:
         extra_data['reported_email'] = reported_email
 
-    # Store raw payload for debugging
-    extra_data['raw'] = payload
+    # Il payload originale non si salva: ripete email, IP e user agent (#20)
 
     # 5. Add event (handles duplicates internally)
     added = email.add_event(our_event_type, event_datetime, **extra_data)

@@ -5,17 +5,20 @@ Da dove riprendere. Il dettaglio sta nei documenti linkati e nelle issue.
 ## 1. Tracciamento di aperture e clic conforme alle linee guida del Garante sul pixel
 
 Piano: `journal/2026-10-29-piano-tracking-gdpr.md`. Issue: [#20](https://github.com/guglielmo/django-brevo-analytics/issues/20).
-Stato: piano scritto, lavoro non iniziato.
+Stato: implementato nel branch `feat/20-anonymous-tracking`, da revisionare e rilasciare.
 Scadenza di adeguamento delle linee guida: 29 ottobre 2026.
 
-- [ ] webhook: impostazione `ANONYMOUS_TRACKING` (default attiva), aperture e clic ignorati, niente più `raw`
-- [ ] comando `anonymize_tracking_data` per ripulire i dati già salvati
-- [ ] import da CSV: salta aperture e clic, corregge "Caricata per procura"
-- [ ] statistiche e interfaccia: tassi "non disponibile", via filtri per destinatario e IP/user agent
-- [ ] test, documentazione, rilascio 0.11.0
+- [x] webhook: impostazione `ANONYMOUS_TRACKING` (default attiva), aperture e clic ignorati, niente più `raw`
+- [x] comando `anonymize_tracking_data` per ripulire i dati già salvati
+- [x] import da CSV: salta aperture e clic, corregge "Caricata per procura"
+- [x] statistiche e interfaccia: tassi "non disponibile", via filtri per destinatario e IP/user agent
+- [x] test e documentazione (README, CHANGELOG sotto Unreleased)
+- [ ] rilascio 0.11.0 (bump di versione, tag, release GitHub)
+- [ ] test della suite su PostgreSQL (`TEST_DB=postgres`): girata solo su SQLite
 - [ ] da verificare: forma degli eventi anonimi al webhook (invio di prova)
-- [ ] da decidere: conservare o no i totali storici di apertura e clic per messaggio
+- [x] deciso: i totali storici di apertura e clic si conservano di default; `--discard-totals` per cancellarli
 - [ ] opzionale: tassi aggregati dall'API di Brevo; conservazione limitata
 
-Raccordi: l'intervento sul webhook va in produzione **prima** di attivare
-"Anonymous email tracking" sugli account Brevo.
+Raccordi: la 0.11.0 va in produzione **prima** di attivare "Anonymous email
+tracking" sugli account Brevo; dopo il deploy, `anonymize_tracking_data` su ogni
+installazione.

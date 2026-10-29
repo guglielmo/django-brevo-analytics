@@ -7,6 +7,7 @@ import requests
 from urllib.parse import quote
 from .models import BrevoMessage, BrevoEmail
 from .sender_utils import get_allowed_senders, is_sender_allowed
+from .tracking import TRACKING_EVENT_TYPES, is_anonymous_tracking
 from .serializers import (
     BrevoMessageSerializer,
     BrevoEmailListSerializer,
@@ -45,7 +46,11 @@ def dashboard_api(request):
     else:
         delivery_rate = 0.0
 
-    if total_delivered > 0:
+    if is_anonymous_tracking():
+        # Tassi globali non disponibili: sommerebbero totali storici e invii senza dati (#20)
+        open_rate = None
+        click_rate = None
+    elif total_delivered > 0:
         open_rate = round((kpi['total_opened'] or 0) / total_delivered * 100, 2)
         click_rate = round((kpi['total_clicked'] or 0) / total_delivered * 100, 2)
     else:
@@ -116,6 +121,11 @@ def message_emails_api(request, message_id):
         'sent': ['sent', 'delivered', 'opened', 'clicked', 'bounced', 'blocked', 'deferred', 'unsubscribed'],
     }
     status_filter = request.GET.get('status')
+    if status_filter in TRACKING_EVENT_TYPES and is_anonymous_tracking():
+        return Response(
+            {'error': 'Open/click filters are not available with ANONYMOUS_TRACKING'},
+            status=400,
+        )
     if status_filter:
         statuses = STATUS_IMPLIES.get(status_filter, [status_filter])
         emails = emails.filter(current_status__in=statuses)

@@ -55,6 +55,14 @@ class BrevoMessage(models.Model):
         help_text="Statistiche da ricalcolare (impostato dal webhook con STATS_UPDATE='deferred')."
     )
 
+    # Totali di apertura e clic conservati da anonymize_tracking_data (#20):
+    # update_stats() non li ricalcola più dagli eventi, che sono stati cancellati
+    tracking_totals_frozen = models.BooleanField(
+        default=False,
+        help_text="Totali e tassi di apertura e clic storici, conservati in forma aggregata "
+                  "dopo la cancellazione degli eventi per destinatario."
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -96,12 +104,12 @@ class BrevoMessage(models.Model):
 
         emails = self.emails.all()
         total = emails.count()
+        # Totali storici conservati: aperture e clic non si ricalcolano
+        frozen = self.tracking_totals_frozen
 
         if total == 0:
             self.total_sent = 0
             self.total_delivered = 0
-            self.total_opened = 0
-            self.total_clicked = 0
             self.total_bounced = 0
             self.total_blocked = 0
             self.total_bounced_hard = 0
@@ -109,8 +117,11 @@ class BrevoMessage(models.Model):
             self.total_bounced_undetermined = 0
             self.total_deferred = 0
             self.delivery_rate = 0.0
-            self.open_rate = 0.0
-            self.click_rate = 0.0
+            if not frozen:
+                self.total_opened = 0
+                self.total_clicked = 0
+                self.open_rate = 0.0
+                self.click_rate = 0.0
             self.sent_at = None
             self.save(update_fields=self.STATS_UPDATE_FIELDS)
             return
@@ -157,8 +168,9 @@ class BrevoMessage(models.Model):
 
         self.total_sent = sent_count
         self.total_delivered = stats['delivered']
-        self.total_opened = stats['opened']
-        self.total_clicked = stats['clicked']
+        if not frozen:
+            self.total_opened = stats['opened']
+            self.total_clicked = stats['clicked']
         self.total_bounced = stats['bounced']
         self.total_blocked = stats['blocked']
         self.total_bounced_hard = b_hard
@@ -169,7 +181,7 @@ class BrevoMessage(models.Model):
         # Calcola rates
         if self.total_sent > 0:
             self.delivery_rate = round(self.total_delivered / self.total_sent * 100, 2)
-        if self.total_delivered > 0:
+        if self.total_delivered > 0 and not frozen:
             self.open_rate = round(self.total_opened / self.total_delivered * 100, 2)
             self.click_rate = round(self.total_clicked / self.total_delivered * 100, 2)
 

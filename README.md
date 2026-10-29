@@ -13,8 +13,9 @@ A reusable Django package that integrates transactional email analytics from Bre
 ### Email Tracking
 - **Message-level View**: All emails grouped by message with aggregate statistics
 - **Email Detail Modal**: Complete event timeline for each recipient
-- **Status Filtering**: Filter by delivered, opened, clicked, bounced, blocked
+- **Status Filtering**: Filter by delivered, bounced, blocked (and opened, clicked with per-recipient tracking)
 - **Event Timeline**: Chronological view of all email events with metadata
+- **Anonymous by Default**: Opens and clicks are not recorded per recipient (see [Anonymous Tracking](#anonymous-tracking))
 
 ### Blacklist Management
 - **Check Individual Emails**: Verify if an email is in Brevo's blacklist
@@ -156,6 +157,65 @@ Options:
 - `--message-id ID`: Recalculate a single message
 - `--dirty`: Recalculate only the messages marked by the webhook in deferred mode (see [Statistics Update Mode](#statistics-update-mode))
 
+### Anonymize Tracking Data
+
+```bash
+python manage.py anonymize_tracking_data
+```
+
+Removes the per-recipient open/click data already stored: deletes `opened` and
+`clicked` events, recomputes each email's status, and strips raw payloads, IP
+addresses, user agents and links from the remaining events. Bounce type and
+reason are kept. See [Anonymous Tracking](#anonymous-tracking).
+
+Options:
+- `--dry-run`: Show what would change without modifying data
+- `--discard-totals`: Do not keep historical open/click totals and rates (by default they are kept as aggregate data)
+
+## Anonymous Tracking
+
+Since 0.11.0 the package does **not** record opens and clicks per recipient
+(`ANONYMOUS_TRACKING = True`, the default). This follows the Italian Data
+Protection Authority's guidelines on tracking pixels in emails (Garante per la
+protezione dei dati personali, provvedimento n. 284 of 17 April 2026): without
+the recipient's consent, a tracking pixel may only measure the overall open
+rate of a send, with anonymized data.
+
+### What Changes
+
+- **Webhook**: open and click events (`unique_opened`, `opened`,
+  `unique_proxy_open`, `proxy_open`, `click`) are acknowledged with `200` and
+  not stored. The raw Brevo payload is no longer stored for any event.
+- **Log import**: open and click rows are skipped and counted in the output.
+- **Dashboard and API**: open/click totals and rates are shown as not available
+  (`null` in the API), except for historical totals kept by
+  `anonymize_tracking_data`. The "opened" and "clicked" filters are disabled;
+  emails previously marked as opened or clicked are shown as delivered, without
+  their open/click events.
+- **Unchanged**: sent, delivered, bounced (hard/soft), blocked, deferred, spam,
+  unsubscribed, and blacklist management. These events do not come from the
+  pixel and are what sender reputation depends on.
+
+Events anonymized by Brevo (see below) arrive without a usable message ID or
+recipient: they are always acknowledged with `200` and ignored, whatever the
+setting, so Brevo does not retry them and no error is logged.
+
+### Enabling Anonymous Tracking in Brevo
+
+The package setting stops storing the data; the pixel itself is inserted by
+Brevo. Enable "Anonymous email tracking" in each Brevo account (Settings →
+Automations → Transactional emails → Tracking; marketing campaigns have a
+separate switch). It applies to future events only.
+
+### Per-Recipient Tracking
+
+Set `ANONYMOUS_TRACKING = False` to get the behaviour of previous versions back
+(per-recipient opens and clicks, with IP address, user agent and clicked link).
+Under the guidelines this requires the recipients' consent, an information
+notice, and a way to withdraw consent to tracking alone while still receiving
+the emails. Brevo's anonymization switch is per account, so it cannot be
+disabled for consenting recipients only.
+
 ## Architecture
 
 ### Django-Native Design
@@ -197,6 +257,7 @@ Options:
 - `CLIENT_UID`: UUID for tracking client (defaults to generated UUID)
 - `STATS_UPDATE`: When message counters are recalculated — `'sync'` (default, inside the webhook request) or `'deferred'` (see [Statistics Update Mode](#statistics-update-mode))
 - `STATS_UPDATE_HANDLER`: Dotted path of a callable that enqueues the recalculation of a message (only used when `STATS_UPDATE = 'deferred'`)
+- `ANONYMOUS_TRACKING`: `True` (default) does not record opens and clicks per recipient; `False` restores per-recipient tracking, which requires consent (see [Anonymous Tracking](#anonymous-tracking))
 
 ## Tag-Based Message Grouping
 
@@ -433,6 +494,25 @@ python -m build
 - Check network connectivity to Brevo API
 
 ## Upgrading
+
+### Upgrade note (0.11.0)
+
+**Default behaviour changes**: opens and clicks are no longer recorded per
+recipient (see [Anonymous Tracking](#anonymous-tracking)). New field
+`BrevoMessage.tracking_totals_frozen` (additive, default `False`).
+
+After upgrading the package:
+
+1. `python manage.py migrate brevo_analytics` — adds the new column.
+2. `python manage.py anonymize_tracking_data --dry-run`, then
+   `python manage.py anonymize_tracking_data` — removes the per-recipient
+   open/click data already stored. Historical open/click totals per message are
+   kept as aggregate data unless you pass `--discard-totals`.
+3. Enable "Anonymous email tracking" for transactional emails in each Brevo
+   account.
+
+If you rely on per-recipient opens and clicks and have the recipients'
+consent, set `ANONYMOUS_TRACKING = False` before upgrading and skip step 2.
 
 ### Upgrade note (0.10.0)
 

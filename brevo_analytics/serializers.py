@@ -1,6 +1,11 @@
 from django.conf import settings
 from rest_framework import serializers
 from .models import BrevoMessage, BrevoEmail
+from .tracking import is_anonymous_tracking, public_events, public_status, tracking_totals_available
+
+# Campi di BrevoMessage nascosti (None) quando i totali di apertura e clic non
+# sono disponibili: in modalità anonima, salvo i totali storici conservati
+TRACKING_TOTAL_FIELDS = ('total_opened', 'total_clicked', 'open_rate', 'click_rate')
 
 
 def _display_subject(raw_subject):
@@ -25,6 +30,8 @@ def _display_subject(raw_subject):
 class BrevoMessageSerializer(serializers.ModelSerializer):
     """Serializer per lista messaggi"""
     display_subject = serializers.SerializerMethodField()
+    # Aperture e clic per destinatario disponibili (filtri "aperte" e "cliccate")
+    recipient_tracking = serializers.SerializerMethodField()
 
     class Meta:
         model = BrevoMessage
@@ -33,15 +40,34 @@ class BrevoMessageSerializer(serializers.ModelSerializer):
             'total_sent', 'total_delivered', 'total_opened',
             'total_clicked', 'total_bounced', 'total_blocked',
             'delivery_rate', 'open_rate', 'click_rate',
-            'updated_at'
+            'recipient_tracking', 'updated_at'
         ]
 
     def get_display_subject(self, obj):
         """Return human-readable subject, stripping tag prefix and ID when in tag grouping mode."""
         return _display_subject(obj.subject)
 
+    def get_recipient_tracking(self, obj):
+        return not is_anonymous_tracking()
 
-class BrevoEmailListSerializer(serializers.ModelSerializer):
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if not tracking_totals_available(instance):
+            for field in TRACKING_TOTAL_FIELDS:
+                data[field] = None
+        return data
+
+
+class PublicStatusMixin:
+    """current_status come lo espongono le API (vedi tracking.public_status)."""
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['current_status'] = public_status(data['current_status'])
+        return data
+
+
+class BrevoEmailListSerializer(PublicStatusMixin, serializers.ModelSerializer):
     """Serializer per lista email (senza eventi)"""
     class Meta:
         model = BrevoEmail
@@ -50,9 +76,10 @@ class BrevoEmailListSerializer(serializers.ModelSerializer):
         ]
 
 
-class BrevoEmailDetailSerializer(serializers.ModelSerializer):
+class BrevoEmailDetailSerializer(PublicStatusMixin, serializers.ModelSerializer):
     """Serializer per dettaglio email (con eventi e messaggio)"""
     message = serializers.SerializerMethodField()
+    events = serializers.SerializerMethodField()
 
     class Meta:
         model = BrevoEmail
@@ -60,6 +87,9 @@ class BrevoEmailDetailSerializer(serializers.ModelSerializer):
             'id', 'recipient_email', 'current_status',
             'sent_at', 'events', 'message', 'blacklist_info'
         ]
+
+    def get_events(self, obj):
+        return public_events(obj.events)
 
     def get_message(self, obj):
         return {
@@ -76,7 +106,7 @@ class MessageBrevoEmailsSerializer(serializers.Serializer):
     emails = BrevoEmailListSerializer(many=True)
 
 
-class GlobalBrevoEmailsSerializer(serializers.ModelSerializer):
+class GlobalBrevoEmailsSerializer(PublicStatusMixin, serializers.ModelSerializer):
     """Serializer per email globali bounced/blocked (con info messaggio)"""
     message = serializers.SerializerMethodField()
 

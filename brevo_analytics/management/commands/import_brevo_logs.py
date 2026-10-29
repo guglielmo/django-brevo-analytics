@@ -20,6 +20,7 @@ import time
 from typing import Optional
 from brevo_analytics.models import BrevoMessage, BrevoEmail
 from brevo_analytics.sender_utils import get_allowed_senders, build_sender_sql_clause
+from brevo_analytics.tracking import TRACKING_EVENT_TYPES, is_anonymous_tracking
 
 
 # Mapping from CSV st_text values to our event types
@@ -28,7 +29,7 @@ from brevo_analytics.sender_utils import get_allowed_senders, build_sender_sql_c
 EVENT_TYPE_MAPPING = {
     'Inviata': 'sent',
     'Consegnata': 'delivered',
-    'Caricata per procura': 'delivered',  # Alternative delivered status
+    'Caricata per procura': 'opened',  # apertura via proxy (Brevo: "Loaded by proxy")
     'Prima apertura': 'opened',
     'Aperta': None,
     'Cliccata': 'clicked',
@@ -101,6 +102,14 @@ class Command(BaseCommand):
             # Show total rows
             total_rows = conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0]
             self.stdout.write(f"✓ Loaded {total_rows:,} log entries")
+
+            # Righe anonimizzate da Brevo ("Anonymous email tracking"): non si
+            # collegano a nessun invio, quindi restano fuori dall'import (#20)
+            anonymized_rows = conn.execute("""
+                SELECT COUNT(*) FROM logs
+                WHERE lower(trim(mid)) LIKE 'anonymized%'
+                   OR lower(trim(email)) LIKE 'anonymized%'
+            """).fetchone()[0]
 
             # Clean up message IDs (remove angle brackets)
             conn.execute("""
@@ -222,6 +231,9 @@ class Command(BaseCommand):
             messages_dict = {}  # (subject, sent_date) -> BrevoMessage
             bounces_enriched = 0
             bounces_failed = 0
+            # In modalità anonima aperture e clic non si importano (#20)
+            anonymous_tracking = is_anonymous_tracking()
+            tracking_skipped = 0
 
             # Process in batches
             BATCH_SIZE = 500
@@ -327,6 +339,10 @@ class Command(BaseCommand):
 
                         # Skip explicitly ignored events (e.g. repeated opens)
                         if event_type is None:
+                            continue
+
+                        if anonymous_tracking and event_type in TRACKING_EVENT_TYPES:
+                            tracking_skipped += 1
                             continue
 
                         event_timestamp_raw = event_raw['timestamp']
@@ -449,6 +465,12 @@ class Command(BaseCommand):
 
             if duplicates_skipped > 0:
                 self.stdout.write(f"ℹ️  Skipped {duplicates_skipped:,} duplicate entries in CSV")
+
+            if tracking_skipped > 0:
+                self.stdout.write(f"ℹ️  Skipped {tracking_skipped:,} open/click events (ANONYMOUS_TRACKING)")
+
+            if anonymized_rows > 0:
+                self.stdout.write(f"ℹ️  Skipped {anonymized_rows:,} anonymized log entries")
 
             if api_key and (bounces_enriched > 0 or bounces_failed > 0):
                 self.stdout.write(f"✓ Enriched {bounces_enriched}/{bounces_enriched + bounces_failed} bounces with reasons from API")

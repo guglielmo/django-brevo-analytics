@@ -28,6 +28,10 @@ const formatDateTime = (dateValue, options = null) => {
   return `${datePart} - ${timePart}`
 }
 
+// Tassi e totali di apertura/clic: null quando non disponibili (ANONYMOUS_TRACKING)
+const formatRate = (rate) => rate === null || rate === undefined ? t('not_available') : `${rate}%`
+const formatCount = (count) => count === null || count === undefined ? t('not_available') : count
+
 const formatShortDate = (dateValue) => {
   if (!dateValue) return ''
   const locale = getConfig().languageCode === 'it' ? 'it-IT' : 'en-US'
@@ -408,11 +412,11 @@ const Dashboard = {
           </div>
           <div class="kpi-card">
             <div class="kpi-label">{{ t('open_rate') }}</div>
-            <div class="kpi-value">{{ kpi.open_rate }}%</div>
+            <div class="kpi-value">{{ formatRate(kpi.open_rate) }}</div>
           </div>
           <div class="kpi-card">
             <div class="kpi-label">{{ t('click_rate') }}</div>
-            <div class="kpi-value">{{ kpi.click_rate }}%</div>
+            <div class="kpi-value">{{ formatRate(kpi.click_rate) }}</div>
           </div>
           <div class="kpi-card clickable">
             <div class="kpi-label">{{ t('emails_bounced') }}</div>
@@ -463,8 +467,8 @@ const Dashboard = {
                     {{ msg.delivery_rate }}%
                   </span>
                 </td>
-                <td>{{ msg.open_rate }}%</td>
-                <td>{{ msg.click_rate }}%</td>
+                <td>{{ formatRate(msg.open_rate) }}</td>
+                <td>{{ formatRate(msg.click_rate) }}</td>
                 <td>
                   <a v-if="msg.total_bounced > 0"
                      @click.stop
@@ -542,6 +546,7 @@ const Dashboard = {
       displayedMessages,
       t,
       formatDate: formatShortDate,  // Use global helper
+      formatRate,
       rateClass,
       goToMessage
     }
@@ -577,19 +582,22 @@ const MessageEmails = {
             <div class="kpi-label">{{ t('delivered_status') }}</div>
             <div class="kpi-value">{{ message.total_delivered }}</div>
           </div>
+          <!-- Aperture e clic: filtri per destinatario solo con recipient_tracking -->
           <div
             class="kpi-card"
-            :class="{ active: activeFilter === 'opened' }"
-            @click="setFilter('opened')">
+            :class="{ active: activeFilter === 'opened', 'not-filterable': !message.recipient_tracking }"
+            :title="message.recipient_tracking ? '' : t('anonymous_tracking_hint')"
+            @click="message.recipient_tracking && setFilter('opened')">
             <div class="kpi-label">{{ t('opened_status') }}</div>
-            <div class="kpi-value">{{ message.total_opened }}</div>
+            <div class="kpi-value">{{ formatCount(message.total_opened) }}</div>
           </div>
           <div
             class="kpi-card"
-            :class="{ active: activeFilter === 'clicked' }"
-            @click="setFilter('clicked')">
+            :class="{ active: activeFilter === 'clicked', 'not-filterable': !message.recipient_tracking }"
+            :title="message.recipient_tracking ? '' : t('anonymous_tracking_hint')"
+            @click="message.recipient_tracking && setFilter('clicked')">
             <div class="kpi-label">{{ t('clicked_status') }}</div>
-            <div class="kpi-value">{{ message.total_clicked }}</div>
+            <div class="kpi-value">{{ formatCount(message.total_clicked) }}</div>
           </div>
           <div
             class="kpi-card"
@@ -752,6 +760,7 @@ const MessageEmails = {
       filterEmails,
       formatDate,
       formatDateTime,
+      formatCount,
       statusLabel,
       openEmailDetail
     }
