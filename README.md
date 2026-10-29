@@ -546,6 +546,17 @@ python -m build
 
 ## Upgrading
 
+### Upgrade note (0.12.0)
+
+New command `fetch_brevo_rates` and new field `BrevoMessage.tracking_totals_fetched_at`
+(additive, nullable). Default behaviour does not change.
+
+1. `python manage.py migrate brevo_analytics` — adds the new column.
+2. Optional, to get open/click rates for new sends with anonymous tracking: tag
+   every send with its own tag, set `MESSAGE_GROUP_BY = 'tag'`, and schedule
+   `python manage.py fetch_brevo_rates`. See
+   [Open and Click Rates from Brevo's Statistics API](#open-and-click-rates-from-brevos-statistics-api).
+
 ### Upgrade note (0.11.0)
 
 **Default behaviour changes**: opens and clicks are no longer recorded per

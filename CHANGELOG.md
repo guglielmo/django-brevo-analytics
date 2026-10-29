@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-29
+
 ### Added
 
 - **Open/click rates from Brevo's statistics API** (#22): new `fetch_brevo_rates` command. With anonymous tracking the package has no open/click data for new sends; the command reads Brevo's aggregate unique opens and clicks for each tag-grouped message of the last 90 days (`/v3/smtp/statistics/aggregatedReport`, one tag per send, `MESSAGE_GROUP_BY = 'tag'`), scales them to the deliveries counted by the package and stores them as aggregate totals. To be scheduled: opens keep arriving for days after a send.
@@ -15,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Dashboard: with anonymous tracking the global open/click rates are computed on the messages that have aggregate totals (kept by `anonymize_tracking_data` or fetched from Brevo, above `MIN_AGGREGATE_RECIPIENTS`), instead of being always "n/a".
+- Tests use a fast password hasher: the suite runs in under a second.
+
+### Upgrade note (0.12.0)
+
+Run `python manage.py migrate brevo_analytics` (adds `tracking_totals_fetched_at`). To get open/click rates for new sends with anonymous tracking: tag every send with its own tag, set `MESSAGE_GROUP_BY = 'tag'`, and schedule `python manage.py fetch_brevo_rates` (hourly or daily). See "Open and Click Rates from Brevo's Statistics API" in the README.
 
 ## [0.11.0] - 2026-10-29
 
