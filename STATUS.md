@@ -4,7 +4,8 @@ Da dove riprendere. Il dettaglio sta nei documenti linkati e nelle issue.
 
 ## 1. Tracciamento di aperture e clic conforme alle linee guida del Garante sul pixel
 
-Piano: `journal/2026-10-29-piano-tracking-gdpr.md`. Stato: piano scritto, lavoro non iniziato.
+Piano: `journal/2026-10-29-piano-tracking-gdpr.md`. Issue: [#20](https://github.com/guglielmo/django-brevo-analytics/issues/20).
+Stato: piano scritto, lavoro non iniziato.
 Scadenza di adeguamento delle linee guida: 29 ottobre 2026.
 
 - [ ] webhook: impostazione `ANONYMOUS_TRACKING` (default attiva), aperture e clic ignorati, niente più `raw`
