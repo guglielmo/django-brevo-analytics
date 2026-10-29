@@ -15,7 +15,7 @@ Scadenza di adeguamento delle linee guida: 29 ottobre 2026.
 - [x] test e documentazione (README, CHANGELOG sotto Unreleased)
 - [x] review approfondita: corretti comando di pulizia (a blocchi, conferma, soglia di 10 destinatari per i totali storici), tassi sui totali conservati, eventi anonimizzati e sconosciuti nel webhook
 - [ ] rilascio 0.11.0 (bump di versione, tag, release GitHub)
-- [ ] test della suite su PostgreSQL (`TEST_DB=postgres`): girata solo su SQLite
+- [x] test della suite su PostgreSQL 16 (`TEST_DB=postgres`): 126 test OK, nessuno saltato
 - [ ] da verificare: forma degli eventi anonimi al webhook (invio di prova)
 - [x] deciso: i totali storici di apertura e clic si conservano di default; `--discard-totals` per cancellarli
 - [ ] opzionale: tassi aggregati dall'API di Brevo; conservazione limitata
